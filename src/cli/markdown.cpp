@@ -27,6 +27,9 @@ constexpr const char *ITALIC = "\x1b[3m";
 constexpr const char *UNDERLINE = "\x1b[4m";
 constexpr const char *STRIKE = "\x1b[9m";
 
+constexpr int INTERNAL_LINK_COLOR = 75;
+constexpr int EXTERNAL_LINK_COLOR = 208;
+
 constexpr std::size_t MAX_CELL_WIDTH = 48;
 
 struct Style {
@@ -63,6 +66,43 @@ struct ListState {
 
 std::string Spaces(std::size_t count) {
 	return std::string(count, ' ');
+}
+
+bool IsExternalLink(const std::string &href) {
+	auto scheme_end = href.find("://");
+	std::size_t host_start = 0;
+	if (scheme_end != std::string::npos) {
+		auto scheme = href.substr(0, scheme_end);
+		for (auto &c : scheme) {
+			c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+		}
+		if (scheme != "http" && scheme != "https") {
+			return true;
+		}
+		host_start = scheme_end + 3;
+	} else if (href.compare(0, 2, "//") == 0) {
+		host_start = 2;
+	} else {
+		// Relative paths and bare fragments stay inside the documentation.
+		auto colon = href.find(':');
+		auto slash = href.find('/');
+		return colon != std::string::npos && (slash == std::string::npos || colon < slash);
+	}
+
+	auto host_end = href.find_first_of("/?#", host_start);
+	auto authority = href.substr(host_start, host_end == std::string::npos ? std::string::npos : host_end - host_start);
+	auto user_info = authority.rfind('@');
+	if (user_info != std::string::npos) {
+		authority = authority.substr(user_info + 1);
+	}
+	auto port = authority.rfind(':');
+	if (port != std::string::npos && authority.find(']') == std::string::npos) {
+		authority.resize(port);
+	}
+	for (auto &c : authority) {
+		c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+	}
+	return authority != "duckdb.org" && authority != "www.duckdb.org";
 }
 
 bool IsEscape(const std::string &text, std::size_t pos) {
@@ -1349,7 +1389,7 @@ private:
 		sink_ = &link_buf_;
 		link_href_ = info ? std::string(info->href.text, info->href.size) : std::string();
 		styles_.push_back(styles_.back());
-		styles_.back().fg = 75;
+		styles_.back().fg = IsExternalLink(link_href_) ? EXTERNAL_LINK_COLOR : INTERNAL_LINK_COLOR;
 		styles_.back().underline = true;
 		EmitStyle();
 	}

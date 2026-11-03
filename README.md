@@ -234,11 +234,13 @@ Keys:
 
 ```text
 Up, Down, j, k          Scroll one line
+Mouse wheel             Scroll three lines
 PageUp, PageDown        Scroll one page
 g, G, Home, End         Jump to the start or end
 Left, p                 Previous result; at the first result, open the search page
 Right                   Next result; wraps from the last result to the first
 n                       Next result; at the last result, open the search page
+Enter                   Go back from an internal page
 Esc                     Go back; Esc in the search prompt exits the program
 /                       Find text in the current page (Enter repeats)
 q, Ctrl-C               Quit
@@ -254,8 +256,8 @@ Clicking a link in the page content opens it inside the pager when the target
 page is part of the bundled documentation or blog. This also applies to links
 written for older documentation versions: the local page is shown instead of
 the published URL. The internal view has the same scrolling and find-in-page
-keys; Esc or a click on `[Back]` returns to the previous page, and `q` or Ctrl-C
-quits the application.
+keys; Enter, Esc, or a click on `[Back]` returns to the previous page, and `q`
+or Ctrl-C quits the application.
 
 Links to other sites open with the desktop's default handler (`xdg-open` or
 `gio open` on Linux, `open` on macOS). This uses the pager's own mouse handling,
@@ -285,7 +287,8 @@ keeping the gutter.
 
 Links in the rendered page are emitted as OSC 8 terminal hyperlinks. The label
 is underlined and clickable, but the URL is not printed, which keeps pages
-readable. Relative Markdown targets and bare `#fragment` anchors are resolved to
+readable. Links to the bundled documentation are blue, while links to other
+sites are orange. Relative Markdown targets and bare `#fragment` anchors are resolved to
 absolute `https://duckdb.org/...` URLs first, so every link points at the
 published page. This works in terminals that support OSC 8 (GNOME Terminal,
 iTerm2, Kitty, WezTerm, Alacritty, Windows Terminal, and others). Use `--raw` to

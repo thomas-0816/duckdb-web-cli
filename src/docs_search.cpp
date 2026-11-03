@@ -1028,6 +1028,11 @@ bool LookupPageByUrl(const std::string &url, SearchResult &result) {
 	if (!DuckDbPathFromUrl(url, path)) {
 		return false;
 	}
+	// The website's installation landing page is not part of the Markdown
+	// export. Open the bundled installation page instead of a browser tab.
+	if (path == "/install") {
+		path = "/docs/2.0/operations_manual/installing_duckdb";
+	}
 	if (path.compare(0, 6, "/docs/") == 0 || path == "/docs") {
 		auto &manual = GetManualCorpus();
 		if (LookupPathInCorpus(manual, path, false, result)) {

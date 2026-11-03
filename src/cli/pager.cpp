@@ -41,7 +41,11 @@ enum : int {
 	KEY_END,
 	KEY_DELETE,
 	KEY_MOUSE,
+	KEY_WHEEL_UP,
+	KEY_WHEEL_DOWN,
 };
+
+constexpr std::size_t WHEEL_SCROLL_LINES = 3;
 
 struct MouseEvent {
 	int button = 0;
@@ -575,10 +579,10 @@ int ReadKey() {
 				auto button = values[0];
 				if ((button & 64) != 0) {
 					if (button == 64) {
-						return KEY_UP;
+						return KEY_WHEEL_UP;
 					}
 					if (button == 65) {
-						return KEY_DOWN;
+						return KEY_WHEEL_DOWN;
 					}
 					return 0;
 				}
@@ -797,7 +801,7 @@ std::string MakeStatus(std::size_t index, std::size_t total, std::size_t top, st
 	if (!internal) {
 		status += "  |  Left/Right result";
 	} else {
-		status += "  |  Esc back";
+		status += "  |  Enter/Esc back";
 	}
 	status += "  |  q quit";
 	auto limit = static_cast<std::size_t>(std::max(columns - 1, 1));
@@ -1206,12 +1210,12 @@ QueryEdit EditQuery(const char *label, SearchFunction search, idx_t limit, const
 				edit.accepted = true;
 				return edit;
 			}
-			if (key == KEY_UP) {
+			if (key == KEY_UP || key == KEY_WHEEL_UP) {
 				auto entry_count = edit.results.size() + 1;
 				edit.selected = (edit.selected + entry_count - 1) % entry_count;
 				continue;
 			}
-			if (key == KEY_DOWN) {
+			if (key == KEY_DOWN || key == KEY_WHEEL_DOWN) {
 				auto entry_count = edit.results.size() + 1;
 				edit.selected = (edit.selected + 1) % entry_count;
 				continue;
@@ -1298,6 +1302,8 @@ bool RunInternalPage(const char *label, const SearchResult &result, bool color, 
 		case 3:
 			return true;
 		case 27:
+		case '\r':
+		case '\n':
 			return false;
 		case '/': {
 			auto find = EditFind(std::string(), color);
@@ -1323,6 +1329,12 @@ bool RunInternalPage(const char *label, const SearchResult &result, bool color, 
 			}
 			break;
 		}
+		case KEY_WHEEL_UP:
+			scroll = scroll > WHEEL_SCROLL_LINES ? scroll - WHEEL_SCROLL_LINES : 0;
+			break;
+		case KEY_WHEEL_DOWN:
+			scroll = std::min(max_scroll, scroll + WHEEL_SCROLL_LINES);
+			break;
 		case KEY_UP:
 		case 'k':
 			if (scroll > 0) {
@@ -1498,6 +1510,12 @@ int RunPager(const char *label, SearchFunction search, idx_t limit, const std::s
 					}
 					break;
 				}
+				case KEY_WHEEL_UP:
+					positions[index] = positions[index] > WHEEL_SCROLL_LINES ? positions[index] - WHEEL_SCROLL_LINES : 0;
+					break;
+				case KEY_WHEEL_DOWN:
+					positions[index] = std::min(max_scroll, positions[index] + WHEEL_SCROLL_LINES);
+					break;
 				case KEY_UP:
 				case 'k':
 					if (positions[index] > 0) {
