@@ -9,7 +9,6 @@
 #include <algorithm>
 #include <cstdlib>
 #include <exception>
-#include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -445,8 +444,7 @@ int RunCli(const char *program, const SearchMode &mode, int argc, char **argv) {
 	for (idx_t i = 0; i < results.size(); i++) {
 		auto &result = results[i];
 		std::ostringstream details;
-		details << "(" << (i + 1) << '/' << results.size() << ", score " << std::fixed << std::setprecision(2)
-		        << result.score << ")";
+		details << "(" << (i + 1) << '/' << results.size() << ")";
 		auto detail_text = details.str();
 		if (color) {
 			std::cout << HEADER_COLOR << label << RESET << "   " << BOLD << query << RESET << "   " << DIM
