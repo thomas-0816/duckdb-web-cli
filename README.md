@@ -25,6 +25,11 @@ duckdb-docs.md                      documentation text
 ```
 
 The documentation and blog Markdown files may also be placed under `data/`.
+If either file is missing, it is downloaded automatically from
+`https://blobs.duckdb.org/docs/` at startup; the URL is printed before the
+transfer starts. `docs --update` downloads both files again even when they
+already exist.
+
 Generated files are written next to the binary, so the whole installation stays
 in one directory and nothing is left behind in `/tmp`. The cache is invalidated
 with SHA-1 checksums of the source files, so updating a Markdown file or the
@@ -75,6 +80,7 @@ Options:
 
 ```text
 -l, --limit N          Maximum number of results (default 10, max 1000)
+-u, --update           Download both Markdown files again and exit
     --color[=WHEN]     Colorize output: auto (default), always, never
     --no-color         Disable colors (same as --color=never)
     --raw              Print the original Markdown without rendering
@@ -331,6 +337,7 @@ Requirements:
 
 - a C99 compiler and a C++17 compiler
 - CMake 3.16 or newer
+- OpenSSL development headers, used to download the Markdown sources over HTTPS
 - the Q8_0 GGUF model file (downloaded by a script and embedded at build time)
 - on Linux and Windows, the Vulkan SDK (including `glslc`); on macOS, the
   Metal toolchain that ships with Xcode
@@ -399,7 +406,7 @@ or, equivalently:
 cmake --install build/release --prefix "$HOME/.local"
 ```
 
-The install step copies the binary and the three source files into
+The install step copies the binary and the two Markdown sources into
 `$HOME/.local/bin`. Make sure that directory is on `PATH`; llama.cpp and the
 embedding model are linked statically, so the only runtime requirement is the
 platform GPU stack. After that, `.system docs "..."` works directly inside the
@@ -415,7 +422,9 @@ duckdb-blog.md
 ```
 
 At run time the binary looks for them next to itself. For compatibility it also
-accepts `data/duckdb-docs.md` and `data/duckdb-blog.md`.
+accepts `data/duckdb-docs.md` and `data/duckdb-blog.md`. When a file is missing,
+it is fetched from `https://blobs.duckdb.org/docs/` and written next to the
+binary. `docs --update` re-downloads both files unconditionally.
 
 On first use, the program splits each Markdown file at headings (`#` through
 `######`) and writes section metadata plus a copy of the normalized text. These

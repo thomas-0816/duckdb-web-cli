@@ -3,6 +3,7 @@
 #include "cli/markdown.hpp"
 #include "cli/pager.hpp"
 #include "docs_search.hpp"
+#include "docs_storage.hpp"
 
 #include <cstdlib>
 #include <exception>
@@ -54,6 +55,7 @@ void PrintUsage(const char *program) {
 	std::cerr << "\n";
 	std::cerr << "Options:\n";
 	std::cerr << "  -l, --limit N          Maximum number of results (default 10, max 1000)\n";
+	std::cerr << "  -u, --update           Download both Markdown files again and exit\n";
 	std::cerr << "      --color[=WHEN]     Colorize output: auto (default), always, never\n";
 	std::cerr << "      --no-color         Disable colors (same as --color=never)\n";
 	std::cerr << "      --raw              Print the original Markdown without rendering\n";
@@ -113,6 +115,7 @@ int RunCli(const char *program, const SearchMode &mode, int argc, char **argv) {
 	bool limit_set = false;
 	bool raw = false;
 	bool no_pager = false;
+	bool update = false;
 	ColorMode color_mode = ColorMode::AUTO;
 	std::vector<std::string> positional;
 
@@ -177,6 +180,10 @@ int RunCli(const char *program, const SearchMode &mode, int argc, char **argv) {
 			no_pager = true;
 			continue;
 		}
+		if (argument == "-u" || argument == "--update") {
+			update = true;
+			continue;
+		}
 		positional.push_back(std::move(argument));
 	}
 
@@ -192,6 +199,24 @@ int RunCli(const char *program, const SearchMode &mode, int argc, char **argv) {
 	auto query = Join(positional);
 	bool color = UseColor(color_mode);
 	auto label = mode.label;
+
+	// The Markdown sources are installed next to the binary, but a fresh or
+	// partial installation may be missing them. Fetch them before any corpus is
+	// loaded so every search path sees the same complete data. --update forces
+	// both files to be fetched again, even when they already exist.
+	bool needs_corpora = query.empty() && !no_pager && isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
+	if (update || !query.empty() || needs_corpora) {
+		try {
+			EnsureCorpusFiles(update);
+		} catch (const std::exception &exception) {
+			std::cerr << program << ": " << exception.what() << "\n";
+			return 1;
+		}
+		if (update && query.empty()) {
+			return 0;
+		}
+	}
+
 	if (query.empty()) {
 		if (!no_pager && isatty(STDIN_FILENO) && isatty(STDOUT_FILENO)) {
 			try {

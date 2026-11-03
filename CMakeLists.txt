@@ -94,6 +94,27 @@ add_library(md4c STATIC
 )
 target_include_directories(md4c PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/md4c)
 
+# Missing Markdown corpora are downloaded at startup through the cpp-httplib
+# copy that ships with llama.cpp. llama.cpp only builds it together with its
+# common library, which is disabled here, so compile the vendored source
+# directly. HTTPS needs OpenSSL, which is not otherwise required by this build.
+find_package(Threads REQUIRED)
+find_package(OpenSSL REQUIRED)
+
+add_library(docs_httplib STATIC
+  third_party/llama.cpp/vendor/cpp-httplib/httplib.cpp
+)
+target_include_directories(docs_httplib PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party/llama.cpp/vendor)
+target_compile_definitions(docs_httplib PUBLIC CPPHTTPLIB_OPENSSL_SUPPORT)
+target_link_libraries(docs_httplib PUBLIC OpenSSL::SSL OpenSSL::Crypto Threads::Threads)
+set_target_properties(docs_httplib PROPERTIES POSITION_INDEPENDENT_CODE ON)
+if(MSVC)
+  target_compile_options(docs_httplib PRIVATE /w)
+else()
+  target_compile_options(docs_httplib PRIVATE -w)
+endif()
+
 add_library(docs_core STATIC
   src/docs_search.cpp
   src/docs_storage.cpp
@@ -103,6 +124,7 @@ add_library(docs_core STATIC
   src/cli/pager.cpp
 )
 target_link_libraries(docs_core PUBLIC md4c llama)
+target_link_libraries(docs_core PRIVATE docs_httplib)
 
 target_include_directories(docs_core
   PUBLIC
@@ -110,6 +132,7 @@ target_include_directories(docs_core
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
+target_compile_definitions(docs_core PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(docs_core PRIVATE -ffunction-sections -fdata-sections)

@@ -9,6 +9,9 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -16,6 +19,8 @@
 #include <vector>
 
 #include <unistd.h>
+
+#include "cpp-httplib/httplib.h"
 
 namespace docs {
 namespace {
@@ -173,6 +178,21 @@ std::string FirstExisting(const std::vector<std::string> &paths) {
 		}
 	}
 	return paths.empty() ? std::string() : paths.front();
+}
+
+bool FileHasContent(const std::string &path) {
+	std::error_code error;
+	auto size = std::filesystem::file_size(path, error);
+	return !error && size > 0;
+}
+
+std::string FirstWithContent(const std::vector<std::string> &paths) {
+	for (auto &path : paths) {
+		if (FileHasContent(path)) {
+			return path;
+		}
+	}
+	return FirstExisting(paths);
 }
 
 std::string ReadFile(const std::string &path) {
@@ -519,10 +539,10 @@ const DataPaths &GetDataPaths() {
 	static const DataPaths paths = [] {
 		DataPaths result;
 		result.binary_dir = ExecutableDirectory();
-		result.docs_markdown = FirstExisting({JoinPath(result.binary_dir, "duckdb-docs.md"),
-		                                      JoinPath(result.binary_dir, "data/duckdb-docs.md")});
-		result.blog_markdown = FirstExisting({JoinPath(result.binary_dir, "duckdb-blog.md"),
-		                                      JoinPath(result.binary_dir, "data/duckdb-blog.md")});
+		result.docs_markdown = FirstWithContent({JoinPath(result.binary_dir, "duckdb-docs.md"),
+		                                         JoinPath(result.binary_dir, "data/duckdb-docs.md")});
+		result.blog_markdown = FirstWithContent({JoinPath(result.binary_dir, "duckdb-blog.md"),
+		                                         JoinPath(result.binary_dir, "data/duckdb-blog.md")});
 		result.cache_dir = CacheDirectory(result.binary_dir);
 		result.docs_data = JoinPath(result.cache_dir, "duckdb-docs-data");
 		result.docs_index = JoinPath(result.cache_dir, "duckdb-docs-index");
@@ -532,6 +552,97 @@ const DataPaths &GetDataPaths() {
 		return result;
 	}();
 	return paths;
+}
+
+namespace {
+
+struct CorpusDownload {
+	const char *file_name;
+	const char *url;
+};
+
+constexpr CorpusDownload CORPUS_DOWNLOADS[] = {
+    {"duckdb-docs.md", "https://blobs.duckdb.org/docs/duckdb-docs.md"},
+    {"duckdb-blog.md", "https://blobs.duckdb.org/docs/duckdb-blog.md"},
+};
+
+std::string DownloadUrl(const std::string &url) {
+	// Split the URL into its scheme/host prefix and the request path. The
+	// vendored cpp-httplib client takes the origin when it is constructed.
+	auto scheme_end = url.find("://");
+	auto path_start = scheme_end == std::string::npos ? std::string::npos : url.find('/', scheme_end + 3);
+	if (scheme_end == std::string::npos || path_start == std::string::npos) {
+		throw std::runtime_error("Could not download " + url + ": invalid URL");
+	}
+	auto origin = url.substr(0, path_start);
+	auto path = url.substr(path_start);
+
+	httplib::Client client(origin);
+	client.set_follow_location(true);
+	client.set_connection_timeout(30);
+	client.set_read_timeout(600);
+	client.set_write_timeout(60);
+	client.set_keep_alive(false);
+	client.set_default_headers({{"User-Agent", "duckdb-docs-search/1.0"}});
+
+	auto response = client.Get(path);
+	if (!response) {
+		throw std::runtime_error("Could not download " + url + ": " + httplib::to_string(response.error()));
+	}
+	if (response->status < 200 || response->status >= 300) {
+		throw std::runtime_error("Could not download " + url + ": HTTP status " +
+		                         std::to_string(response->status));
+	}
+	if (response->body.empty()) {
+		throw std::runtime_error("Could not download " + url + ": empty response");
+	}
+	return response->body;
+}
+
+std::string FormatSize(std::size_t bytes) {
+	std::ostringstream output;
+	output << std::fixed << std::setprecision(1);
+	if (bytes >= 1024 * 1024) {
+		output << (static_cast<double>(bytes) / (1024.0 * 1024.0)) << " MB";
+	} else if (bytes >= 1024) {
+		output << (static_cast<double>(bytes) / 1024.0) << " KB";
+	} else {
+		output << bytes << " bytes";
+	}
+	return output.str();
+}
+
+} // namespace
+
+std::vector<std::string> EnsureCorpusFiles(bool force) {
+	auto &paths = GetDataPaths();
+	std::vector<std::string> downloaded;
+
+	for (auto &target : CORPUS_DOWNLOADS) {
+		auto adjacent = JoinPath(paths.binary_dir, target.file_name);
+		auto nested = JoinPath(paths.binary_dir, std::string("data/") + target.file_name);
+		if (!force && (FileHasContent(adjacent) || FileHasContent(nested))) {
+			continue;
+		}
+
+		// Replace the file that the corpus loader will actually read. If only
+		// data/<name> exists, update it there instead of creating a second copy
+		// next to the binary that GetDataPaths() has already resolved past.
+		auto destination = !FileHasContent(adjacent) && FileHasContent(nested) ? nested : adjacent;
+
+		// Show the source before the transfer starts so a slow connection is
+		// visibly making progress instead of appearing to hang.
+		std::cerr << "Downloading " << target.file_name << " from " << target.url << "\n";
+		std::cerr.flush();
+
+		auto data = DownloadUrl(target.url);
+		WriteFileIfChanged(destination, data);
+		downloaded.push_back(destination);
+
+		std::cerr << "Downloaded " << target.file_name << " (" << FormatSize(data.size()) << ") to "
+		          << destination << "\n";
+	}
+	return downloaded;
 }
 
 CorpusFiles LoadCorpusFiles(const std::string &name, const std::string &markdown_path,

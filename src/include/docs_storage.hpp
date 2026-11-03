@@ -23,6 +23,12 @@ struct DataPaths {
 
 const DataPaths &GetDataPaths();
 
+//! Download the Markdown corpora from blobs.duckdb.org when they are missing.
+//! Existing files next to the binary or under data/ are left untouched unless
+//! `force` is set, in which case both are fetched again. Returns the paths of
+//! the files that were downloaded.
+std::vector<std::string> EnsureCorpusFiles(bool force = false);
+
 struct CorpusFiles {
 	std::string data;
 	std::string index;
