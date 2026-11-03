@@ -164,19 +164,21 @@ to `MiniCPM5-1B-Q4_K_M.gguf`. The prompt is rendered with the chat template that
 ships in the model's GGUF metadata, using the Jinja engine in llama.cpp's common
 library, so the special tokens and the thinking block match the model exactly.
 A progress bar is shown while the prompt is being processed, before the first
-token. While the answer streams, the search result list stays visible at the
-top of the screen and remains active: Up/Down selects a result, Enter opens it,
-and clicking it works as usual. The model's reasoning is streamed below the
+token. Loading the answer model shows the same kind of progress below the still
+visible result list. While the answer streams, the search result list stays
+visible at the top of the screen and remains active: Up/Down selects a result,
+Enter opens it, and clicking it works as usual. The model's reasoning is streamed below the
 list under `Reasoning` and is hidden as soon as the answer starts. The final
 answer is streamed under `Answer`; there is no separate source list, because
-the search results above are the sources. Use the mouse wheel or PgUp/PgDn (or
-`b` and Space) to scroll the answer, and Home/End to jump to its start or end.
-Wheel scrolling never changes the selected result. `Esc` stops generation; once
-the answer is finished, `Esc` returns to the search list. `q` quits. If
-generation is stopped before the answer starts, the partial reasoning stays
-visible. The result list and the answer remain on screen together after
-generation completes, so another result can be opened without leaving the
-answer view.
+the search results above are the sources. The cursor stays on the query line:
+typing a character, Backspace, or Delete returns to the search prompt and
+applies that key, so the query can be changed without leaving the view. Use the
+mouse wheel, PgUp/PgDn, or Home/End to scroll the answer; wheel scrolling never
+changes the selected result. `Esc` stops generation; once the answer is
+finished, `Esc` returns to the search list, where `q` quits. If generation is
+stopped before the answer starts, the partial reasoning stays visible. The
+result list and the answer remain on screen together after generation
+completes, so another result can be opened without leaving the answer view.
 
 ```text
 search> how do I read a parquet file?

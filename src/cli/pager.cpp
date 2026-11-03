@@ -1272,15 +1272,22 @@ enum class AnswerAction {
 	Done,
 	Quit,
 	OpenResult,
+	EditQuery,
 };
 
 //! Stream an answer below the still-active search result list. The selected
 //! list entry is updated in place; returning OpenResult asks the caller to open
-//! that result.
+//! that result. Typing returns EditQuery with the key stored in pending_key so
+//! the caller can apply it to the prompt.
 AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
                                    const std::vector<SearchResult> &results,
                                    const std::vector<SearchResult> &search_results, std::size_t &selected,
-                                   bool color);
+                                   std::size_t query_cursor, bool color, int &pending_key);
+
+//! Show the model-loading progress below the still-visible result list.
+void DrawSplitAnswerLoading(const char *label, const std::string &query, std::size_t query_cursor,
+                            const std::vector<SearchResult> &results, std::size_t selected, bool color,
+                            float progress, const std::string &message);
 
 QueryEdit EditQuery(const char *label, SearchFunction search, idx_t limit, const std::string &initial_query,
                     const std::vector<SearchResult> &initial_results, std::size_t initial_selected, bool color,
@@ -1297,6 +1304,8 @@ QueryEdit EditQuery(const char *label, SearchFunction search, idx_t limit, const
 	// An empty search shows the latest blog posts, so the initial screen must
 	// be populated even before the first keystroke.
 	bool dirty = initial_results.empty();
+	// An editing key pressed in the answer view is replayed in the prompt.
+	int pending_key = -1;
 
 	{
 		PagerScreen screen(true);
@@ -1316,7 +1325,8 @@ QueryEdit EditQuery(const char *label, SearchFunction search, idx_t limit, const
 			}
 
 			DrawLiveSearch(label, edit.query, edit.cursor, edit.results, edit.selected, color, error, from_pager);
-			int key = ReadKey();
+			int key = pending_key >= 0 ? pending_key : ReadKey();
+			pending_key = -1;
 			if (key < 0) {
 				break;
 			}
@@ -1381,13 +1391,17 @@ QueryEdit EditQuery(const char *label, SearchFunction search, idx_t limit, const
 					if (!AnswerModelLoaded()) {
 						error.clear();
 						int last_percent = -1;
-						DrawAnswerLoading(label, 0.0f, "Preparing the answer model...", color);
+						auto draw_loading = [&](float progress, const std::string &message) {
+							DrawSplitAnswerLoading(label, edit.query, edit.cursor, edit.results, edit.selected, color,
+							                       progress, message);
+						};
+						draw_loading(0.0f, "Preparing the answer model...");
 						try {
 							PrepareAnswerModel([&](float progress, const std::string &status) {
 								auto percent = static_cast<int>(progress * 100.0f + 0.5f);
 								if (percent != last_percent) {
 									last_percent = percent;
-									DrawAnswerLoading(label, progress, status, color);
+									draw_loading(progress, status);
 								}
 							});
 						} catch (const std::exception &exception) {
@@ -1396,7 +1410,7 @@ QueryEdit EditQuery(const char *label, SearchFunction search, idx_t limit, const
 						}
 					}
 					auto action = ShowAnswerWithResults(label, edit.query, answer_blocks, edit.results, edit.selected,
-					                                    color);
+					                                    edit.cursor, color, pending_key);
 					if (action == AnswerAction::Quit) {
 						break;
 					}
@@ -1870,7 +1884,8 @@ struct SplitAnswerPage {
 SplitAnswerPage BuildSplitAnswerPage(const char *label, const std::string &query,
                                      const std::vector<SearchResult> &results, std::size_t selected, bool color,
                                      const std::string &reasoning, const std::string &answer, bool cancelled,
-                                     const std::string &error, bool final, int terminal_rows, int columns) {
+                                     const std::string &error, bool final, int terminal_rows, int columns,
+                                     const std::string &loading = std::string()) {
 	auto show_correction = !results.empty() && !results.front().corrected_query.empty() && terminal_rows >= 6;
 	SplitAnswerPage built;
 	built.layout = MakeSplitAnswerLayout(results.size() + 2, selected, terminal_rows, show_correction);
@@ -1919,8 +1934,12 @@ SplitAnswerPage BuildSplitAnswerPage(const char *label, const std::string &query
 	page.header.push_back(color ? std::string(DIM) + rule + RESET : rule);
 
 	SearchResult body;
-	body.content = final ? ComposeAnswerContent(reasoning, answer, cancelled, error)
-	                     : ComposeLiveAnswer(reasoning, answer);
+	if (!loading.empty()) {
+		body.content = "\n" + loading + "\n";
+	} else {
+		body.content = final ? ComposeAnswerContent(reasoning, answer, cancelled, error)
+		                     : ComposeLiveAnswer(reasoning, answer);
+	}
 	body.title = "Answer: " + query;
 	AppendPageContent(page, body, color, false, columns);
 	return built;
@@ -1939,16 +1958,16 @@ struct SplitDrawResult {
 	std::size_t max_scroll = 0;
 };
 
-SplitDrawResult DrawSplitAnswerPage(const char *label, const std::string &query,
+SplitDrawResult DrawSplitAnswerPage(const char *label, const std::string &query, std::size_t query_cursor,
                                     const std::vector<SearchResult> &results, std::size_t selected, bool color,
                                     const std::string &reasoning, const std::string &answer, bool cancelled,
                                     const std::string &error, bool final, SplitAnswerView &view,
-                                    const std::string &status) {
+                                    const std::string &status, const std::string &loading = std::string()) {
 	auto size = GetTerminalSize();
 	auto rows = std::max(size.rows, 8);
 	auto columns = std::max(size.columns, 20);
 	auto built = BuildSplitAnswerPage(label, query, results, selected, color, reasoning, answer, cancelled, error,
-	                                  final, rows, columns);
+	                                  final, rows, columns, loading);
 	auto header_rows = built.page.header.size();
 	auto available = static_cast<std::size_t>(std::max(rows - static_cast<int>(header_rows) - 1, 1));
 	auto visible = std::min(built.page.content.size(), available);
@@ -1964,6 +1983,16 @@ SplitDrawResult DrawSplitAnswerPage(const char *label, const std::string &query,
 	pages.push_back(std::move(built.page));
 	Draw(pages, 0, view.scroll, color, std::string(), true, status);
 
+	// Keep the cursor on the query line so the prompt stays editable.
+	auto width_limit = static_cast<std::size_t>(std::max(columns - 1, 1));
+	auto label_text = std::string(label) + "> ";
+	auto label_width = cli::VisibleWidth(label_text);
+	auto query_room = width_limit > label_width ? width_limit - label_width : 0;
+	auto visible_query = FitQueryToWidth(query, query_cursor, query_room);
+	auto cursor_column = std::min<std::size_t>(label_width + visible_query.cursor_width + 1,
+	                                           static_cast<std::size_t>(columns));
+	std::cout << "\x1b[1;" << cursor_column << "H\x1b[?25h" << std::flush;
+
 	SplitDrawResult result;
 	result.layout = built.layout;
 	result.content_links = std::move(content_links);
@@ -1973,10 +2002,29 @@ SplitDrawResult DrawSplitAnswerPage(const char *label, const std::string &query,
 	return result;
 }
 
+void DrawSplitAnswerLoading(const char *label, const std::string &query, std::size_t query_cursor,
+                            const std::vector<SearchResult> &results, std::size_t selected, bool color,
+                            float progress, const std::string &message) {
+	auto size = GetTerminalSize();
+	auto columns = std::max(size.columns, 20);
+	auto percent = static_cast<int>(std::max(0.0f, std::min(1.0f, progress)) * 100.0f + 0.5f);
+	auto bar_width = static_cast<std::size_t>(std::max(10, std::min(44, columns - 12)));
+	auto filled = static_cast<std::size_t>(percent) * bar_width / 100;
+	std::string bar = "[";
+	bar.append(filled, '#');
+	bar.append(bar_width - filled, ' ');
+	bar += "] " + std::to_string(percent) + "%";
+
+	SplitAnswerView view;
+	DrawSplitAnswerPage(label, query, query_cursor, results, selected, color, std::string(), std::string(), false,
+	                    std::string(), false, view, "Preparing the answer model  |  Please wait",
+	                    message + "\n" + bar);
+}
+
 AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
                                    const std::vector<SearchResult> &results,
                                    const std::vector<SearchResult> &search_results, std::size_t &selected,
-                                   bool color) {
+                                   std::size_t query_cursor, bool color, int &pending_key) {
 	std::string reasoning;
 	std::string answer;
 	std::string reasoning_pending;
@@ -1996,8 +2044,8 @@ AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
 	SplitDrawResult current;
 	bool final = false;
 	auto draw = [&](const std::string &status) {
-		current = DrawSplitAnswerPage(label, query, search_results, selected, color, reasoning, answer, cancelled,
-		                              error, final, view, status);
+		current = DrawSplitAnswerPage(label, query, query_cursor, search_results, selected, color, reasoning, answer,
+		                              cancelled, error, final, view, status);
 	};
 
 	auto open_link = [&](const cli::TextLink &link) {
@@ -2028,8 +2076,6 @@ AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
 	auto process_key = [&](int key, bool generating) -> bool {
 		switch (key) {
 		case 3:
-		case 'q':
-		case 'Q':
 			action = AnswerAction::Quit;
 			stop = true;
 			return false;
@@ -2050,11 +2096,9 @@ AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
 			}
 			return false;
 		case KEY_UP:
-		case 'k':
 			selected = selected == 0 ? entry_count - 1 : selected - 1;
 			return true;
 		case KEY_DOWN:
-		case 'j':
 			selected = (selected + 1) % entry_count;
 			return true;
 		case KEY_WHEEL_UP:
@@ -2064,20 +2108,16 @@ AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
 			scroll_answer(1, WHEEL_SCROLL_LINES);
 			return true;
 		case KEY_PGUP:
-		case 'b':
 			scroll_answer(-1, current.available);
 			return true;
 		case KEY_PGDN:
-		case ' ':
 			scroll_answer(1, current.available);
 			return true;
 		case KEY_HOME:
-		case 'g':
 			view.scroll = 0;
 			view.follow_tail = false;
 			return true;
 		case KEY_END:
-		case 'G':
 			view.scroll = current.max_scroll;
 			view.follow_tail = true;
 			return true;
@@ -2121,6 +2161,15 @@ AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
 			return false;
 		}
 		default:
+			// Text editing returns to the prompt with the key replayed, so the
+			// query stays editable while the result list is shown.
+			if (key == 8 || key == 21 || key == 23 || key == KEY_DELETE ||
+			    (key >= 32 && key < 1000)) {
+				cancelled = cancelled || generating;
+				pending_key = key;
+				action = AnswerAction::EditQuery;
+				stop = true;
+			}
 			return false;
 		}
 	};
@@ -2157,8 +2206,8 @@ AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
 				    pending.erase(0, complete);
 			    }
 			    auto status = is_reasoning
-			                      ? "Thinking  |  Up/Down result  |  Enter open  |  PgUp/PgDn scroll  |  Esc stop"
-			                      : "Answering  |  Up/Down result  |  Enter open  |  PgUp/PgDn scroll  |  Esc stop";
+			                      ? "Thinking  |  Up/Down result  |  Enter open  |  Type edit  |  Esc stop"
+			                      : "Answering  |  Up/Down result  |  Enter open  |  Type edit  |  Esc stop";
 			    if (!handle_pending_input(status, true)) {
 				    return false;
 			    }
@@ -2202,13 +2251,16 @@ AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
 	if (action == AnswerAction::OpenResult) {
 		return AnswerAction::OpenResult;
 	}
+	if (action == AnswerAction::EditQuery) {
+		return AnswerAction::EditQuery;
+	}
 
 	final = true;
 	if (view.follow_tail) {
 		view.follow_tail = false;
 		view.scroll = 0;
 	}
-	auto status = "Answer  |  Up/Down result  |  Enter open  |  PgUp/PgDn scroll  |  Esc back  |  q quit";
+	auto status = "Answer  |  Up/Down result  |  Enter open  |  Type edit  |  PgUp/PgDn scroll  |  Esc back";
 	draw(status);
 	while (true) {
 		auto key = ReadKey();
@@ -2226,6 +2278,9 @@ AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
 	}
 	if (action == AnswerAction::OpenResult) {
 		return AnswerAction::OpenResult;
+	}
+	if (action == AnswerAction::EditQuery) {
+		return AnswerAction::EditQuery;
 	}
 	return AnswerAction::Done;
 }
