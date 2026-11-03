@@ -848,7 +848,8 @@ std::size_t FindPreviousMatchLine(const PagerPage &page, const std::string &quer
 }
 
 std::string MakeStatus(std::size_t index, std::size_t total, std::size_t top, std::size_t visible,
-                       std::size_t count, int columns, const std::string &page_query, bool internal = false) {
+                       std::size_t count, int columns, const std::string &page_query, bool internal = false,
+                       bool answer = false) {
 	std::string status;
 	if (!internal) {
 		status += "Result " + std::to_string(index + 1) + "/" + std::to_string(total);
@@ -870,6 +871,8 @@ std::string MakeStatus(std::size_t index, std::size_t total, std::size_t top, st
 	status += "  |  Up/Down scroll";
 	if (!internal) {
 		status += "  |  Left/Right result";
+	} else if (answer) {
+		status += "  |  Left/Right link  |  Enter restart  |  Esc quit";
 	} else {
 		status += "  |  Left/Right link  |  Enter/Esc back";
 	}
@@ -884,7 +887,7 @@ std::string MakeStatus(std::size_t index, std::size_t total, std::size_t top, st
 void Draw(const std::vector<PagerPage> &pages, std::size_t index, std::size_t &scroll, bool color,
           const std::string &page_query = std::string(), bool internal = false,
           const std::string &custom_status = std::string(), std::size_t selected_line = std::size_t(-1),
-          const cli::TextLink *selected_link = nullptr) {
+          const cli::TextLink *selected_link = nullptr, bool answer = false) {
 	auto size = GetTerminalSize();
 	int rows = std::max(size.rows, 3);
 	int columns = std::max(size.columns, 20);
@@ -935,7 +938,8 @@ void Draw(const std::vector<PagerPage> &pages, std::size_t index, std::size_t &s
 		output += "\x1b[7m";
 	}
 	auto status = custom_status.empty()
-	                  ? MakeStatus(index, pages.size(), scroll, visible, page.content.size(), columns, page_query, internal)
+	                  ? MakeStatus(index, pages.size(), scroll, visible, page.content.size(), columns, page_query,
+	                               internal, answer)
 	                  : TruncatePlain(custom_status, static_cast<std::size_t>(std::max(columns - 1, 1)));
 	auto status_limit = static_cast<std::size_t>(std::max(columns - 1, 1));
 	if (status.size() < status_limit) {
@@ -1270,6 +1274,7 @@ bool ShowAnswer(const char *label, const std::string &query, const std::vector<S
 enum class AnswerAction {
 	None,
 	Done,
+	Restart,
 	Quit,
 	OpenResult,
 	EditQuery,
@@ -1409,8 +1414,11 @@ QueryEdit EditQuery(const char *label, SearchFunction search, idx_t limit, const
 							continue;
 						}
 					}
-					auto action = ShowAnswerWithResults(label, edit.query, answer_blocks, edit.results, edit.selected,
-					                                    edit.cursor, color, pending_key);
+					AnswerAction action;
+					do {
+						action = ShowAnswerWithResults(label, edit.query, answer_blocks, edit.results, edit.selected,
+						                               edit.cursor, color, pending_key);
+					} while (action == AnswerAction::Restart);
 					if (action == AnswerAction::Quit) {
 						break;
 					}
@@ -1430,12 +1438,12 @@ QueryEdit EditQuery(const char *label, SearchFunction search, idx_t limit, const
 				edit.accepted = true;
 				return edit;
 			}
-			if (key == KEY_UP || key == KEY_WHEEL_UP) {
+			if (key == KEY_UP) {
 				auto entry_count = edit.results.size() + (edit.results.empty() ? 1 : 2);
 				edit.selected = (edit.selected + entry_count - 1) % entry_count;
 				continue;
 			}
-			if (key == KEY_DOWN || key == KEY_WHEEL_DOWN) {
+			if (key == KEY_DOWN) {
 				auto entry_count = edit.results.size() + (edit.results.empty() ? 1 : 2);
 				edit.selected = (edit.selected + 1) % entry_count;
 				continue;
@@ -1497,7 +1505,7 @@ QueryEdit EditQuery(const char *label, SearchFunction search, idx_t limit, const
 
 //! Show a page opened from a link in the pager. Returns true when the user
 //! asked to quit the whole application; Esc returns to the previous page.
-bool RunInternalPage(const char *label, const SearchResult &result, bool color, bool raw) {
+bool RunInternalPage(const char *label, const SearchResult &result, bool color, bool raw, bool *regenerate = nullptr) {
 	std::vector<PagerPage> pages;
 	auto size = GetTerminalSize();
 	pages.push_back(BuildInternalPage(result, color, raw, size.columns));
@@ -1505,7 +1513,7 @@ bool RunInternalPage(const char *label, const SearchResult &result, bool color, 
 	std::size_t selected_link = std::size_t(-1);
 	std::size_t scroll = 0;
 	std::string page_query;
-	Draw(pages, 0, scroll, color, page_query, true);
+	Draw(pages, 0, scroll, color, page_query, true, std::string(), std::size_t(-1), nullptr, regenerate != nullptr);
 
 	auto open_link = [&](const cli::TextLink &link) -> bool {
 		SearchResult target;
@@ -1546,6 +1554,9 @@ bool RunInternalPage(const char *label, const SearchResult &result, bool color, 
 					return true;
 				}
 				break;
+			}
+			if (regenerate) {
+				*regenerate = true;
 			}
 			return false;
 		case KEY_LEFT:
@@ -1711,7 +1722,8 @@ bool RunInternalPage(const char *label, const SearchResult &result, bool color, 
 				status = "Link " + std::to_string(selected_link + 1) + "/" + std::to_string(links.size()) + ": " +
 				         text + "  |  Enter open  |  Left/Right select  |  Esc clear";
 			}
-			Draw(pages, 0, scroll, color, page_query, true, status, highlight_line, highlight);
+			Draw(pages, 0, scroll, color, page_query, true, status, highlight_line, highlight,
+			     regenerate != nullptr);
 		}
 	}
 }
@@ -2082,11 +2094,18 @@ AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
 		case 27:
 			if (generating) {
 				cancelled = true;
+			} else {
+				action = AnswerAction::Quit;
 			}
 			stop = true;
 			return false;
 		case '\r':
 		case '\n':
+			if (selected == answer_index) {
+				action = AnswerAction::Restart;
+				stop = true;
+				return false;
+			}
 			if (selected < search_results.size()) {
 				action = AnswerAction::OpenResult;
 				stop = true;
@@ -2212,8 +2231,8 @@ AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
 				    pending.erase(0, complete);
 			    }
 			    auto status = is_reasoning
-			                      ? "Thinking  |  Up/Down result  |  Enter open  |  Type edit  |  Esc stop"
-			                      : "Answering  |  Up/Down result  |  Enter open  |  Type edit  |  Esc stop";
+			                      ? "Thinking  |  Up/Down result  |  Enter restart  |  Type edit  |  Esc stop"
+			                      : "Answering  |  Up/Down result  |  Enter restart  |  Type edit  |  Esc stop";
 			    if (!handle_pending_input(status, true)) {
 				    return false;
 			    }
@@ -2260,13 +2279,16 @@ AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
 	if (action == AnswerAction::EditQuery) {
 		return AnswerAction::EditQuery;
 	}
+	if (action == AnswerAction::Restart) {
+		return AnswerAction::Restart;
+	}
 
 	final = true;
 	if (view.follow_tail) {
 		view.follow_tail = false;
 		view.scroll = 0;
 	}
-	auto status = "Answer  |  Up/Down result  |  Enter open  |  Type edit  |  PgUp/PgDn scroll  |  Esc back";
+	auto status = "Answer  |  Enter restart  |  Up/Down result  |  Type edit  |  PgUp/PgDn scroll  |  Esc quit";
 	draw(status);
 	while (true) {
 		auto key = ReadKey();
@@ -2288,6 +2310,9 @@ AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
 	if (action == AnswerAction::EditQuery) {
 		return AnswerAction::EditQuery;
 	}
+	if (action == AnswerAction::Restart) {
+		return AnswerAction::Restart;
+	}
 	return AnswerAction::Done;
 }
 
@@ -2299,79 +2324,103 @@ bool ShowAnswer(const char *label, const std::string &query, const std::vector<S
 	bool answer_started = false;
 	bool cancelled = false;
 	bool quit = false;
+	bool restart = false;
 	std::string error;
 	auto draw = [&](const std::string &status) {
 		DrawAnswerPage(reasoning, answer, query, color, status);
 	};
 
-	draw("Reading the top 10 matching blocks  |  Please wait");
-	try {
-		GenerateAnswer(query, results, [&](const std::string &piece, bool is_reasoning) {
-			if (!is_reasoning && !answer_started) {
-				// The model has stopped thinking. Drop the reasoning from the live
-				// view so the answer starts at the top of the page.
-				answer_started = true;
-				reasoning.clear();
-				reasoning_pending.clear();
-			}
-			auto &pending = is_reasoning ? reasoning_pending : answer_pending;
-			auto &target = is_reasoning ? reasoning : answer;
-			pending += piece;
-			auto complete = cli::Utf8CompleteLength(pending);
-			if (complete > 0) {
-				target.append(pending, 0, complete);
-				pending.erase(0, complete);
-			}
-			while (WaitForInput(0)) {
-				auto key = ReadKey();
-				if (key == 27 || key == 3) {
-					cancelled = true;
-					return false;
-				}
-				if (key == 'q' || key == 'Q') {
-					quit = true;
-					return false;
-				}
-			}
-			if (complete > 0) {
-				auto status = is_reasoning ? "Thinking  |  Esc stop  |  q quit" : "Answering  |  Esc stop  |  q quit";
-				draw(status);
-			}
-			return true;
-		}, [&](std::size_t done, std::size_t total) {
-			auto percent = total == 0 ? 100 : static_cast<int>((done * 100 + total - 1) / total);
-			constexpr std::size_t BAR_WIDTH = 20;
-			std::string bar(BAR_WIDTH, ' ');
-			std::fill_n(bar.begin(), static_cast<std::size_t>(percent) * BAR_WIDTH / 100, '#');
-			auto status = "Processing prompt [" + bar + "] " + std::to_string(percent) + "%";
-			draw(status);
-		});
-	} catch (const std::exception &exception) {
-		error = exception.what();
-	}
-
-	if (quit) {
-		return true;
-	}
-	if (!reasoning_pending.empty()) {
-		reasoning += reasoning_pending;
-	}
-	if (!answer_pending.empty()) {
-		answer += answer_pending;
-	}
-	if (error.empty() && !cancelled && answer.empty() && !reasoning.empty()) {
-		// The model stopped without a thinking end tag, so the text it produced
-		// is the answer rather than a separate reasoning block.
-		answer = std::move(reasoning);
+	while (true) {
 		reasoning.clear();
+		answer.clear();
+		reasoning_pending.clear();
+		answer_pending.clear();
+		answer_started = false;
+		cancelled = false;
+		restart = false;
+		error.clear();
+
+		draw("Reading the top 10 matching blocks  |  Please wait");
+		try {
+			GenerateAnswer(query, results, [&](const std::string &piece, bool is_reasoning) {
+				if (!is_reasoning && !answer_started) {
+					// The model has stopped thinking. Drop the reasoning from the live
+					// view so the answer starts at the top of the page.
+					answer_started = true;
+					reasoning.clear();
+					reasoning_pending.clear();
+				}
+				auto &pending = is_reasoning ? reasoning_pending : answer_pending;
+				auto &target = is_reasoning ? reasoning : answer;
+				pending += piece;
+				auto complete = cli::Utf8CompleteLength(pending);
+				if (complete > 0) {
+					target.append(pending, 0, complete);
+					pending.erase(0, complete);
+				}
+				while (WaitForInput(0)) {
+					auto key = ReadKey();
+					if (key == 27 || key == 3) {
+						cancelled = true;
+						return false;
+					}
+					if (key == 'q' || key == 'Q') {
+						quit = true;
+						return false;
+					}
+					if (key == '\r' || key == '\n') {
+						restart = true;
+						return false;
+					}
+				}
+				if (complete > 0) {
+					auto status = is_reasoning ? "Thinking  |  Esc stop  |  Enter restart  |  q quit"
+					                           : "Answering  |  Esc stop  |  Enter restart  |  q quit";
+					draw(status);
+				}
+				return true;
+			}, [&](std::size_t done, std::size_t total) {
+				auto percent = total == 0 ? 100 : static_cast<int>((done * 100 + total - 1) / total);
+				constexpr std::size_t BAR_WIDTH = 20;
+				std::string bar(BAR_WIDTH, ' ');
+				std::fill_n(bar.begin(), static_cast<std::size_t>(percent) * BAR_WIDTH / 100, '#');
+				auto status = "Processing prompt [" + bar + "] " + std::to_string(percent) + "%";
+				draw(status);
+			});
+		} catch (const std::exception &exception) {
+			error = exception.what();
+		}
+
+		if (quit) {
+			return true;
+		}
+		if (restart) {
+			continue;
+		}
+		if (!reasoning_pending.empty()) {
+			reasoning += reasoning_pending;
+		}
+		if (!answer_pending.empty()) {
+			answer += answer_pending;
+		}
+		if (error.empty() && !cancelled && answer.empty() && !reasoning.empty()) {
+			// The model stopped without a thinking end tag, so the text it produced
+			// is the answer rather than a separate reasoning block.
+			answer = std::move(reasoning);
+			reasoning.clear();
+		}
+
+		auto content = ComposeAnswerContent(reasoning, answer, cancelled, error);
+
+		SearchResult result;
+		result.content = content;
+		result.title = "Answer: " + query;
+		bool regenerate = false;
+		auto done = RunInternalPage(label, result, color, false, &regenerate);
+		if (!regenerate) {
+			return done;
+		}
 	}
-
-	auto content = ComposeAnswerContent(reasoning, answer, cancelled, error);
-
-	SearchResult result;
-	result.content = content;
-	result.title = "Answer: " + query;
-	return RunInternalPage(label, result, color, false);
 }
 
 } // namespace

@@ -20,7 +20,7 @@
 
 #include <unistd.h>
 
-#include "cpp-httplib/httplib.h"
+#include "download.h"
 
 namespace docs {
 namespace {
@@ -567,36 +567,24 @@ constexpr CorpusDownload CORPUS_DOWNLOADS[] = {
 };
 
 std::string DownloadUrl(const std::string &url) {
-	// Split the URL into its scheme/host prefix and the request path. The
-	// vendored cpp-httplib client takes the origin when it is constructed.
-	auto scheme_end = url.find("://");
-	auto path_start = scheme_end == std::string::npos ? std::string::npos : url.find('/', scheme_end + 3);
-	if (scheme_end == std::string::npos || path_start == std::string::npos) {
-		throw std::runtime_error("Could not download " + url + ": invalid URL");
-	}
-	auto origin = url.substr(0, path_start);
-	auto path = url.substr(path_start);
+	common_remote_params params;
+	params.headers.push_back({"User-Agent", "duckdb-docs-search/1.0"});
+	params.timeout = 600;
 
-	httplib::Client client(origin);
-	client.set_follow_location(true);
-	client.set_connection_timeout(30);
-	client.set_read_timeout(600);
-	client.set_write_timeout(60);
-	client.set_keep_alive(false);
-	client.set_default_headers({{"User-Agent", "duckdb-docs-search/1.0"}});
-
-	auto response = client.Get(path);
-	if (!response) {
-		throw std::runtime_error("Could not download " + url + ": " + httplib::to_string(response.error()));
+	std::pair<long, std::vector<char>> response;
+	try {
+		response = common_remote_get_content(url, params);
+	} catch (const std::exception &error) {
+		throw std::runtime_error("Could not download " + url + ": " + error.what());
 	}
-	if (response->status < 200 || response->status >= 300) {
+	if (response.first < 200 || response.first >= 300) {
 		throw std::runtime_error("Could not download " + url + ": HTTP status " +
-		                         std::to_string(response->status));
+		                         std::to_string(response.first));
 	}
-	if (response->body.empty()) {
+	if (response.second.empty()) {
 		throw std::runtime_error("Could not download " + url + ": empty response");
 	}
-	return response->body;
+	return std::string(response.second.begin(), response.second.end());
 }
 
 std::string FormatSize(std::size_t bytes) {
@@ -612,31 +600,40 @@ std::string FormatSize(std::size_t bytes) {
 	return output.str();
 }
 
+class ByteProgressCallback : public common_download_callback {
+public:
+	explicit ByteProgressCallback(const std::function<void(uint64_t, uint64_t)> &progress)
+	    : progress_(progress) {
+	}
+
+	void on_start(const common_download_progress &progress) override {
+		Report(progress);
+	}
+	void on_update(const common_download_progress &progress) override {
+		Report(progress);
+	}
+	void on_done(const common_download_progress &progress, bool ok) override {
+		if (ok) {
+			Report(progress);
+		}
+	}
+
+private:
+	void Report(const common_download_progress &progress) {
+		if (progress_) {
+			progress_(static_cast<uint64_t>(progress.downloaded), static_cast<uint64_t>(progress.total));
+		}
+	}
+
+	const std::function<void(uint64_t, uint64_t)> &progress_;
+};
+
 } // namespace
 
 void DownloadFile(const std::string &url, const std::string &destination,
                   const std::function<void(uint64_t done, uint64_t total)> &progress) {
-	auto scheme_end = url.find("://");
-	auto path_start = scheme_end == std::string::npos ? std::string::npos : url.find('/', scheme_end + 3);
-	if (scheme_end == std::string::npos || path_start == std::string::npos) {
-		throw std::runtime_error("Could not download " + url + ": invalid URL");
-	}
-	auto origin = url.substr(0, path_start);
-	auto path = url.substr(path_start);
-
-	httplib::Client client(origin);
-	client.set_follow_location(true);
-	client.set_connection_timeout(30);
-	client.set_read_timeout(600);
-	client.set_write_timeout(60);
-	client.set_keep_alive(false);
-	client.set_default_headers({{"User-Agent", "duckdb-docs-search/1.0"}});
-
-	// Write to a temporary file first so an interrupted transfer never leaves a
-	// truncated model behind that looks complete.
-	auto temporary = destination + ".part";
 	std::error_code error;
-	auto parent = std::filesystem::path(temporary).parent_path();
+	auto parent = std::filesystem::path(destination).parent_path();
 	if (!parent.empty()) {
 		std::filesystem::create_directories(parent, error);
 		if (error) {
@@ -644,55 +641,23 @@ void DownloadFile(const std::string &url, const std::string &destination,
 		}
 	}
 
-	std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
-	if (!output) {
-		throw std::runtime_error("Could not write " + temporary);
-	}
-	uint64_t written = 0;
-	auto remove_temporary = [&] {
-		output.close();
-		std::remove(temporary.c_str());
-	};
+	ByteProgressCallback callback(progress);
+	common_download_opts opts;
+	opts.headers.push_back({"User-Agent", "duckdb-docs-search/1.0"});
+	opts.callback = &callback;
 
-	auto response = client.Get(
-	    path,
-	    [&](const char *data, std::size_t length) {
-		    output.write(data, static_cast<std::streamsize>(length));
-		    if (!output) {
-			    return false;
-		    }
-		    written += length;
-		    return true;
-	    },
-	    [&](std::size_t current, std::size_t total) {
-		    if (progress) {
-			    progress(static_cast<uint64_t>(current), static_cast<uint64_t>(total));
-		    }
-		    return true;
-	    });
-	output.close();
-
-	if (!response) {
-		remove_temporary();
-		throw std::runtime_error("Could not download " + url + ": " + httplib::to_string(response.error()));
+	// The shared downloader writes to a temporary file and only replaces the
+	// destination when the transfer completes, so an interrupted download never
+	// looks finished.
+	auto status = common_download_file_single(url, destination, opts);
+	if (status == 304) {
+		return;
 	}
-	if (response->status < 200 || response->status >= 300) {
-		remove_temporary();
-		throw std::runtime_error("Could not download " + url + ": HTTP status " +
-		                         std::to_string(response->status));
+	if (status < 0) {
+		throw std::runtime_error("Could not download " + url);
 	}
-	if (written == 0) {
-		remove_temporary();
-		throw std::runtime_error("Could not download " + url + ": empty response");
-	}
-
-	std::filesystem::rename(temporary, destination, error);
-	if (error) {
-		remove_temporary();
-		throw std::runtime_error("Could not move the download to " + destination + ": " + error.message());
-	}
-	if (progress) {
-		progress(written, written);
+	if (status < 200 || status >= 300) {
+		throw std::runtime_error("Could not download " + url + ": HTTP status " + std::to_string(status));
 	}
 }
 

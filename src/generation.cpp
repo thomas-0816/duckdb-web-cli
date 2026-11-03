@@ -1,7 +1,8 @@
 #include "generation.hpp"
 
+#include "arg.h"
 #include "chat.h"
-#include "docs_storage.hpp"
+#include "download.h"
 
 #include <llama.h>
 
@@ -22,9 +23,7 @@
 namespace docs {
 namespace {
 
-constexpr const char *ANSWER_MODEL_FILE = "MiniCPM5-1B-Q4_K_M.gguf";
-constexpr const char *ANSWER_MODEL_URL =
-    "https://huggingface.co/openbmb/MiniCPM5-1B-GGUF/resolve/main/MiniCPM5-1B-Q4_K_M.gguf";
+constexpr const char *ANSWER_MODEL_HF_REPO = "openbmb/MiniCPM5-1B-GGUF:Q4_K_M";
 constexpr const char *ANSWER_MODEL_DOWNLOAD_SIZE = "656 MB";
 constexpr int ANSWER_CONTEXT_TOKENS = 16384;
 constexpr int ANSWER_MAX_OUTPUT_TOKENS = 2048;
@@ -65,30 +64,10 @@ void EnsureLlamaBackend() {
 	(void)initialized;
 }
 
-std::string JoinPath(const std::string &base, const std::string &name) {
-	if (base.empty()) {
-		return name;
-	}
-	if (base.back() == '/' || base.back() == '\\') {
-		return base + name;
-	}
-	return base + "/" + name;
-}
-
 std::string AnswerModelPath() {
-	auto &paths = GetDataPaths();
-	std::vector<std::string> candidates = {
-	    JoinPath(paths.binary_dir, ANSWER_MODEL_FILE),
-	    JoinPath(paths.binary_dir, std::string("data/") + ANSWER_MODEL_FILE),
-	    ANSWER_MODEL_FILE,
-	};
-	for (auto &candidate : candidates) {
-		std::error_code error;
-		if (std::filesystem::exists(candidate, error) && !error) {
-			return candidate;
-		}
-	}
-	return candidates.front();
+	// The model lives in the same Hugging Face cache that llama.cpp's
+	// downloader uses, so it is shared with the llama CLI and other tools.
+	return common_download_resolve_path(ANSWER_MODEL_HF_REPO);
 }
 
 bool ReportLoadProgress(float progress, void *user) {
@@ -99,31 +78,77 @@ bool ReportLoadProgress(float progress, void *user) {
 	return true;
 }
 
-void EnsureAnswerModelFile(const std::string &model_path, const AnswerLoadProgress &progress) {
-	std::error_code error;
-	if (std::filesystem::exists(model_path, error) && !error) {
-		return;
+class AnswerModelDownloadCallback : public common_download_callback {
+public:
+	AnswerModelDownloadCallback(const AnswerLoadProgress &progress, std::string status)
+	    : progress_(progress), status_(std::move(status)) {
 	}
 
-	auto status = std::string("Downloading ") + ANSWER_MODEL_FILE + " (about " + ANSWER_MODEL_DOWNLOAD_SIZE + ")...";
+	void on_start(const common_download_progress &progress) override {
+		Report(progress);
+	}
+	void on_update(const common_download_progress &progress) override {
+		Report(progress);
+	}
+	void on_done(const common_download_progress &progress, bool ok) override {
+		if (ok) {
+			Report(progress);
+		}
+	}
+
+private:
+	void Report(const common_download_progress &progress) {
+		if (!progress_ || progress.total == 0) {
+			return;
+		}
+		auto fraction = static_cast<float>(static_cast<double>(progress.downloaded) /
+		                                   static_cast<double>(progress.total));
+		fraction = std::max(0.0f, std::min(1.0f, fraction));
+		auto percent = static_cast<int>(fraction * 100.0f + 0.5f);
+		if (percent == last_percent_) {
+			return;
+		}
+		last_percent_ = percent;
+		progress_(fraction, status_);
+	}
+
+	const AnswerLoadProgress &progress_;
+	std::string status_;
+	int last_percent_ = -1;
+};
+
+std::string EnsureAnswerModelFile(const std::string &model_path, const AnswerLoadProgress &progress) {
+	std::error_code error;
+	if (!model_path.empty() && std::filesystem::exists(model_path, error) && !error) {
+		return model_path;
+	}
+
+	auto status = std::string("Downloading ") + ANSWER_MODEL_HF_REPO + " (about " + ANSWER_MODEL_DOWNLOAD_SIZE + ")...";
 	if (progress) {
 		progress(0.0f, status);
 	}
-	int last_percent = -1;
-	DownloadFile(ANSWER_MODEL_URL, model_path, [&](uint64_t done, uint64_t total) {
-		if (!progress || total == 0) {
-			return;
-		}
-		auto fraction = static_cast<float>(static_cast<double>(done) / static_cast<double>(total));
-		auto percent = static_cast<int>(std::max(0.0f, std::min(1.0f, fraction)) * 100.0f + 0.5f);
-		if (percent != last_percent) {
-			last_percent = percent;
-			progress(fraction, status);
-		}
-	});
+
+	// Resolve and fetch through llama.cpp's Hugging Face cache, the same path
+	// `llama download -hf` uses, so the model is shared with other tools.
+	common_params params;
+	params.model.hf_repo = ANSWER_MODEL_HF_REPO;
+
+	AnswerModelDownloadCallback callback(progress, status);
+	try {
+		auto handler = common_models_handler_init(params, LLAMA_EXAMPLE_DOWNLOAD);
+		common_models_handler_apply(handler, params, &callback);
+	} catch (const std::exception &failure) {
+		throw std::runtime_error("Could not download " + std::string(ANSWER_MODEL_HF_REPO) + ": " + failure.what());
+	}
+
+	error.clear();
+	if (params.model.path.empty() || !std::filesystem::exists(params.model.path, error) || error) {
+		throw std::runtime_error("Could not download " + std::string(ANSWER_MODEL_HF_REPO));
+	}
 	if (progress) {
 		progress(0.0f, "Download complete; loading the model weights...");
 	}
+	return params.model.path;
 }
 
 std::vector<llama_token> Tokenize(const llama_vocab *vocab, const std::string &text) {
@@ -370,8 +395,7 @@ void PrepareAnswerModel(const AnswerLoadProgress &progress) {
 		}
 		return;
 	}
-	auto model_path = AnswerModelPath();
-	EnsureAnswerModelFile(model_path, progress);
+	auto model_path = EnsureAnswerModelFile(AnswerModelPath(), progress);
 	if (progress) {
 		progress(0.0f, "Loading the model weights...");
 	}

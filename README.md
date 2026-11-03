@@ -20,7 +20,6 @@ The program looks for these files in its own directory:
 
 ```text
 docs                                the binary (includes the embedding model)
-MiniCPM5-1B-Q4_K_M.gguf             answer model (optional, used by answer mode)
 duckdb-blog.md                      blog text
 duckdb-docs.md                      documentation text
 ```
@@ -154,8 +153,9 @@ a query; `docs --llm` on its own prints an error.
 Select `Answer with LLM` in the result list and press Enter. The first use loads
 the MiniCPM5 answer model and shows a progress bar while the weights are read.
 When `MiniCPM5-1B-Q4_K_M.gguf` is missing, it is downloaded from Hugging Face
-first and the same progress bar shows the transfer. The model is a separate GGUF
-file next to the binary and stays loaded for the rest of the session.
+through llama.cpp's downloader and stored in the standard Hugging Face cache
+(`~/.cache/huggingface/hub`); the same progress bar shows the transfer. The model
+stays loaded for the rest of the session.
 
 The program searches the documentation and blog as usual, takes the ten
 best-matching content blocks (chunks of at most about 1,800 characters, each
@@ -166,20 +166,20 @@ library, so the special tokens and the thinking block match the model exactly.
 A progress bar is shown while the prompt is being processed, before the first
 token. Loading the answer model shows the same kind of progress below the still
 visible result list. While the answer streams, the search result list stays
-visible at the top of the screen and remains active: Up/Down selects a result,
-Enter opens it, and clicking it works as usual. The model's reasoning is streamed below the
-list under `Reasoning` and is hidden as soon as the answer starts. The final
+visible at the top of the screen. Up/Down selects a result and clicking it opens
+that result; `Enter` stops generation and starts it again, so a new answer can
+be requested without leaving the view. The model's reasoning is streamed below
+the list under `Reasoning` and is hidden as soon as the answer starts. The final
 answer is streamed under `Answer`; there is no separate source list, because
 the search results above are the sources. The cursor stays on the query line:
 Left/Right move it, and typing a character, Backspace, or Delete returns to the
 search prompt and applies that key, so the query can be changed without leaving
 the view. Use the mouse wheel, PgUp/PgDn, or Home/End to scroll the answer;
 wheel scrolling never changes the selected result. `Esc` stops generation; once
-the answer is finished, `Esc` returns to the search list, where `q` quits. If
-generation is stopped before the answer starts, the partial reasoning stays
-visible. The result list and the answer remain on screen together after
-generation completes, so another result can be opened without leaving the
-answer view.
+the answer is finished, `Esc` exits the application. If generation is stopped
+before the answer starts, the partial reasoning stays visible. The result list
+and the answer remain on screen together after generation completes, so another
+result can be opened without leaving the answer view.
 
 ```text
 search> how do I read a parquet file?
@@ -433,9 +433,8 @@ embedding model:
 scripts/fetch_models.sh
 ```
 
-Place `MiniCPM5-1B-Q4_K_M.gguf` in the project root before building to have it
-copied next to the `docs` binary and installed with the program. This is
-optional: when the model is missing, answer mode downloads it on first use.
+The answer model is not part of the build. When it is missing, answer mode
+downloads it into the Hugging Face cache on first use.
 
 Then build with CMake:
 
@@ -454,17 +453,16 @@ The build produces the binary and copies its source data next to it:
 
 ```text
 build/release/docs
-build/release/MiniCPM5-1B-Q4_K_M.gguf
 build/release/duckdb-docs.md
 build/release/duckdb-blog.md
 ```
 
 The Linux build with Vulkan shaders is about 84 MB because it contains the Q8_0
 embedding model (~35 MB), llama.cpp, and the compiled GPU shaders. The macOS
-build with Metal is smaller. The MiniCPM5 answer model (~656 MB) stays a separate
-file next to the binary (`build/release/MiniCPM5-1B-Q4_K_M.gguf`). The embedding
-model is linked into the executable; the answer model is loaded from disk when
-answer mode is opened for the first time.
+build with Metal is smaller. The MiniCPM5 answer model (~656 MB) is downloaded on
+demand into the Hugging Face cache. The embedding model is linked into the
+executable; the answer model is loaded from disk when answer mode is opened for
+the first time.
 
 Run it directly:
 

@@ -97,8 +97,9 @@ add_library(md4c STATIC
 target_include_directories(md4c PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/md4c)
 
 # Missing Markdown corpora and the answer model are downloaded at startup
-# through cpp-httplib. The common library builds it with HTTPS support when
-# OpenSSL is available, so link that target instead of compiling a second copy.
+# through llama.cpp's common download helpers, the same code the llama CLI
+# uses. The common library builds cpp-httplib with HTTPS support when OpenSSL
+# is available.
 find_package(Threads REQUIRED)
 find_package(OpenSSL REQUIRED)
 
@@ -112,7 +113,7 @@ add_library(docs_core STATIC
   src/cli/pager.cpp
 )
 target_link_libraries(docs_core PUBLIC md4c llama)
-target_link_libraries(docs_core PRIVATE llama-common cpp-httplib)
+target_link_libraries(docs_core PRIVATE llama-common)
 
 target_include_directories(docs_core
   PUBLIC
@@ -161,27 +162,6 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
 target_compile_definitions(docs_core PRIVATE
   DOCS_EMBEDDED_MODEL_SHA1="${DOCS_EMBEDDED_MODEL_SHA1}")
 message(STATUS "Embedding semantic model ${DOCS_EMBED_MODEL_FILE}")
-
-# The answer model stays a separate file next to the binary. It is copied there
-# after a successful build when it is present in the source tree, and answer
-# mode loads it lazily on first use. A checkout without it can still build the
-# search front end.
-set(DOCS_ANSWER_MODEL_FILE ${CMAKE_CURRENT_SOURCE_DIR}/MiniCPM5-1B-Q4_K_M.gguf)
-if(EXISTS ${DOCS_ANSWER_MODEL_FILE})
-  add_custom_command(TARGET docs POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-      ${DOCS_ANSWER_MODEL_FILE} $<TARGET_FILE_DIR:docs>
-    COMMENT "Copying MiniCPM5 answer model next to the docs binary"
-    VERBATIM)
-  install(FILES ${DOCS_ANSWER_MODEL_FILE} DESTINATION ${CMAKE_INSTALL_BINDIR})
-  message(STATUS "Answer model ${DOCS_ANSWER_MODEL_FILE} is kept next to the binary")
-else()
-  message(WARNING
-    "Answer model not found: ${DOCS_ANSWER_MODEL_FILE}\n"
-    "The build succeeds; answer mode will download the model on first use.")
-endif()
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-  ${DOCS_ANSWER_MODEL_FILE})
 
 if(DOCS_LINK_OPTIONS)
   target_link_options(docs PRIVATE ${DOCS_LINK_OPTIONS})
