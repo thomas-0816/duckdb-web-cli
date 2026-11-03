@@ -15,11 +15,19 @@ struct SearchResult {
 	//! Corrected query when spelling correction changed the query, empty
 	//! otherwise.
 	std::string corrected_query;
+	//! Canonical page URL when the result comes from a known page, empty
+	//! otherwise.
+	std::string url;
 };
 
 std::vector<SearchResult> SearchManual(const std::string &query, idx_t limit);
 std::vector<SearchResult> SearchBlog(const std::string &query, idx_t limit);
 std::vector<SearchResult> SearchAll(const std::string &query, idx_t limit);
+
+//! Return the best-matching semantic content blocks instead of whole pages.
+//! Each block is one chunk of a page (at most about 1800 characters) and keeps
+//! the page title as a prefix. Used as context for answer mode.
+std::vector<SearchResult> SearchAnswerBlocks(const std::string &query, idx_t limit);
 
 //! Build the semantic index ahead of the first search, with a progress
 //! indicator. Called at startup so the query does not sit silently while the

@@ -1627,6 +1627,30 @@ private:
 
 } // namespace
 
+std::size_t Utf8CompleteLength(const std::string &text) {
+	std::size_t position = 0;
+	while (position < text.size()) {
+		auto byte = static_cast<unsigned char>(text[position]);
+		std::size_t length = 1;
+		if ((byte & 0xe0) == 0xc0) {
+			length = 2;
+		} else if ((byte & 0xf0) == 0xe0) {
+			length = 3;
+		} else if ((byte & 0xf8) == 0xf0) {
+			length = 4;
+		} else if ((byte & 0x80) != 0) {
+			// Standalone continuation byte: keep it rather than stall forever.
+			position++;
+			continue;
+		}
+		if (position + length > text.size()) {
+			break;
+		}
+		position += length;
+	}
+	return position;
+}
+
 std::vector<TextLink> ExtractLinks(const std::string &text) {
 	std::vector<TextLink> links;
 	std::string current_url;

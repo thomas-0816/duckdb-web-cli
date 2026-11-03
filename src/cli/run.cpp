@@ -4,7 +4,9 @@
 #include "cli/pager.hpp"
 #include "docs_search.hpp"
 #include "docs_storage.hpp"
+#include "generation.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <exception>
 #include <iomanip>
@@ -60,6 +62,7 @@ void PrintUsage(const char *program) {
 	std::cerr << "      --no-color         Disable colors (same as --color=never)\n";
 	std::cerr << "      --raw              Print the original Markdown without rendering\n";
 	std::cerr << "      --no-pager         Print every result instead of paging interactively\n";
+	std::cerr << "      --llm              Answer with the local LLM instead of listing results\n";
 	std::cerr << "  -h, --help             Show this help\n";
 }
 
@@ -108,6 +111,166 @@ std::string Join(const std::vector<std::string> &parts) {
 	return result;
 }
 
+//! Answer `query` with the local model. On a terminal this uses the same live
+//! answer view as the `Answer with LLM` entry, so the reasoning is visible
+//! while the model thinks. Otherwise the reasoning and answer are streamed to
+//! stdout, followed by the source pages.
+int RunAnswerQuery(const char *program, const char *label, const std::string &query, bool color, bool no_pager) {
+	std::vector<SearchResult> blocks;
+	try {
+		blocks = SearchAnswerBlocks(query, ANSWER_RESULT_COUNT);
+	} catch (const std::exception &exception) {
+		std::cerr << program << ": " << exception.what() << "\n";
+		return 1;
+	}
+	if (blocks.empty()) {
+		std::cerr << program << ": no matching documentation content for '" << query << "'\n";
+		return 1;
+	}
+
+	bool interactive = !no_pager && isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
+	if (interactive) {
+		try {
+			RunAnswer(label, query, blocks, color);
+			return 0;
+		} catch (const std::exception &exception) {
+			std::cerr << program << ": " << exception.what() << "\n";
+			return 1;
+		}
+	}
+
+	auto stderr_tty = isatty(STDERR_FILENO) != 0;
+	auto clear_status = [&]() {
+		if (stderr_tty) {
+			std::cerr << "\r\x1b[K";
+			std::cerr.flush();
+		}
+	};
+	auto show_status = [&](const std::string &status) {
+		if (!stderr_tty) {
+			return;
+		}
+		std::cerr << "\r\x1b[K" << status;
+		std::cerr.flush();
+	};
+
+	try {
+		if (!AnswerModelLoaded()) {
+			int last_percent = -1;
+			show_status("Preparing the answer model...");
+			PrepareAnswerModel([&](float progress, const std::string &status) {
+				auto percent = static_cast<int>(progress * 100.0f + 0.5f);
+				if (percent == last_percent) {
+					return;
+				}
+				last_percent = percent;
+				show_status(status + " " + std::to_string(percent) + "%");
+			});
+		}
+	} catch (const std::exception &exception) {
+		clear_status();
+		std::cerr << program << ": " << exception.what() << "\n";
+		return 1;
+	}
+
+	std::string pending;
+	std::string reasoning_pending;
+	bool wrote_answer = false;
+	bool wrote_reasoning = false;
+	bool reasoning_heading = false;
+	bool answer_heading = false;
+	bool status_cleared = false;
+	char last_character = '\0';
+	auto write_reasoning = [&](std::string &text) {
+		if (!wrote_reasoning) {
+			auto first = text.find_first_not_of("\r\n");
+			if (first == std::string::npos) {
+				text.clear();
+				return;
+			}
+			text.erase(0, first);
+		}
+		auto complete = cli::Utf8CompleteLength(text);
+		if (complete == 0) {
+			return;
+		}
+		if (!reasoning_heading) {
+			std::cout << "### Reasoning\n\n";
+			reasoning_heading = true;
+		}
+		std::cout.write(text.data(), static_cast<std::streamsize>(complete));
+		std::cout.flush();
+		text.erase(0, complete);
+		wrote_reasoning = true;
+	};
+	try {
+		GenerateAnswer(
+		    query, blocks,
+		    [&](const std::string &piece, bool reasoning) {
+			    if (!status_cleared) {
+				    clear_status();
+				    status_cleared = true;
+			    }
+			    if (reasoning) {
+				    reasoning_pending += piece;
+				    write_reasoning(reasoning_pending);
+				    return true;
+			    }
+			    pending += piece;
+			    if (!wrote_answer) {
+				    auto first = pending.find_first_not_of("\r\n");
+				    if (first == std::string::npos) {
+					    pending.clear();
+					    return true;
+				    }
+				    pending.erase(0, first);
+			    }
+			    auto complete = cli::Utf8CompleteLength(pending);
+			    if (complete > 0) {
+				    if (reasoning_heading && !answer_heading) {
+					    std::cout << "\n\n### Answer\n\n";
+					    answer_heading = true;
+				    }
+				    std::cout.write(pending.data(), static_cast<std::streamsize>(complete));
+				    std::cout.flush();
+				    last_character = pending[complete - 1];
+				    pending.erase(0, complete);
+				    wrote_answer = true;
+			    }
+			    return true;
+		    },
+		    [&](std::size_t done, std::size_t total) {
+			    auto percent = total == 0 ? 100 : static_cast<int>((done * 100 + total - 1) / total);
+			    show_status("Processing prompt " + std::to_string(percent) + "%");
+		    });
+	} catch (const std::exception &exception) {
+		clear_status();
+		std::cerr << program << ": " << exception.what() << "\n";
+		return 1;
+	}
+	clear_status();
+	if (!reasoning_pending.empty()) {
+		write_reasoning(reasoning_pending);
+	}
+	if (!pending.empty()) {
+		if (reasoning_heading && !answer_heading) {
+			std::cout << "\n\n### Answer\n\n";
+			answer_heading = true;
+		}
+		std::cout << pending;
+		last_character = pending.back();
+		wrote_answer = true;
+	}
+	if (!wrote_answer) {
+		std::cout << "No answer was generated.\n";
+	} else if (last_character != '\n') {
+		std::cout << "\n";
+	}
+	std::cout << "\n" << BuildAnswerSources(blocks);
+	std::cout.flush();
+	return 0;
+}
+
 } // namespace
 
 int RunCli(const char *program, const SearchMode &mode, int argc, char **argv) {
@@ -116,6 +279,7 @@ int RunCli(const char *program, const SearchMode &mode, int argc, char **argv) {
 	bool raw = false;
 	bool no_pager = false;
 	bool update = false;
+	bool llm = false;
 	ColorMode color_mode = ColorMode::AUTO;
 	std::vector<std::string> positional;
 
@@ -184,6 +348,10 @@ int RunCli(const char *program, const SearchMode &mode, int argc, char **argv) {
 			update = true;
 			continue;
 		}
+		if (argument == "--llm") {
+			llm = true;
+			continue;
+		}
 		positional.push_back(std::move(argument));
 	}
 
@@ -199,6 +367,11 @@ int RunCli(const char *program, const SearchMode &mode, int argc, char **argv) {
 	auto query = Join(positional);
 	bool color = UseColor(color_mode);
 	auto label = mode.label;
+
+	if (llm && query.empty()) {
+		std::cerr << program << ": --llm requires a query\n";
+		return 2;
+	}
 
 	// The Markdown sources are installed next to the binary, but a fresh or
 	// partial installation may be missing them. Fetch them before any corpus is
@@ -240,6 +413,10 @@ int RunCli(const char *program, const SearchMode &mode, int argc, char **argv) {
 		PrepareSemanticSearch(query);
 	} catch (const std::exception &exception) {
 		std::cerr << program << ": semantic index unavailable: " << exception.what() << "\n";
+	}
+
+	if (llm) {
+		return RunAnswerQuery(program, label, query, color, no_pager);
 	}
 
 	std::vector<SearchResult> results;

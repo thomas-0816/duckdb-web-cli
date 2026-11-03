@@ -699,6 +699,7 @@ std::vector<SemanticHit> SearchSemantic(const std::vector<SemanticDocument> &doc
 		SemanticHit hit;
 		hit.type = record.type;
 		hit.page_id = record.page_id;
+		hit.document_id = label;
 		hit.score = 1.0f - static_cast<float>(entry.first);
 		hits.push_back(hit);
 	}

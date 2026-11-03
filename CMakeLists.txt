@@ -51,13 +51,15 @@ endif()
 # Build the llama.cpp submodule as a static library. Its runtime is linked into
 # the docs binary, so no separate runtime installation is needed.
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-set(LLAMA_BUILD_COMMON OFF CACHE BOOL "" FORCE)
+# The common library renders the model's chat template with its Jinja engine,
+# so the answer prompt follows the GGUF metadata instead of a hand-written copy.
+set(LLAMA_BUILD_COMMON ON CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_APP OFF CACHE BOOL "" FORCE)
-set(LLAMA_OPENSSL OFF CACHE BOOL "" FORCE)
+set(LLAMA_OPENSSL ON CACHE BOOL "" FORCE)
 set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
 
 # GPU backends: Metal on Apple, Vulkan everywhere else (Linux and Windows).
@@ -94,45 +96,31 @@ add_library(md4c STATIC
 )
 target_include_directories(md4c PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/md4c)
 
-# Missing Markdown corpora are downloaded at startup through the cpp-httplib
-# copy that ships with llama.cpp. llama.cpp only builds it together with its
-# common library, which is disabled here, so compile the vendored source
-# directly. HTTPS needs OpenSSL, which is not otherwise required by this build.
+# Missing Markdown corpora and the answer model are downloaded at startup
+# through cpp-httplib. The common library builds it with HTTPS support when
+# OpenSSL is available, so link that target instead of compiling a second copy.
 find_package(Threads REQUIRED)
 find_package(OpenSSL REQUIRED)
-
-add_library(docs_httplib STATIC
-  third_party/llama.cpp/vendor/cpp-httplib/httplib.cpp
-)
-target_include_directories(docs_httplib PUBLIC
-  ${CMAKE_CURRENT_SOURCE_DIR}/third_party/llama.cpp/vendor)
-target_compile_definitions(docs_httplib PUBLIC CPPHTTPLIB_OPENSSL_SUPPORT)
-target_link_libraries(docs_httplib PUBLIC OpenSSL::SSL OpenSSL::Crypto Threads::Threads)
-set_target_properties(docs_httplib PROPERTIES POSITION_INDEPENDENT_CODE ON)
-if(MSVC)
-  target_compile_options(docs_httplib PRIVATE /w)
-else()
-  target_compile_options(docs_httplib PRIVATE -w)
-endif()
 
 add_library(docs_core STATIC
   src/docs_search.cpp
   src/docs_storage.cpp
   src/semantic.cpp
+  src/generation.cpp
   src/cli/run.cpp
   src/cli/markdown.cpp
   src/cli/pager.cpp
 )
 target_link_libraries(docs_core PUBLIC md4c llama)
-target_link_libraries(docs_core PRIVATE docs_httplib)
+target_link_libraries(docs_core PRIVATE llama-common cpp-httplib)
 
 target_include_directories(docs_core
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/include
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/llama.cpp/vendor
 )
-target_compile_definitions(docs_core PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(docs_core PRIVATE -ffunction-sections -fdata-sections)
@@ -150,9 +138,11 @@ set(DOCS_MODEL_ASM ${CMAKE_CURRENT_BINARY_DIR}/embedded_model.S)
 if(APPLE)
   set(DOCS_MODEL_SYMBOL_PREFIX "_")
   set(DOCS_MODEL_SECTION "__TEXT,__const")
+  set(DOCS_ASM_NOTE "")
 else()
   set(DOCS_MODEL_SYMBOL_PREFIX "")
   set(DOCS_MODEL_SECTION ".rodata")
+  set(DOCS_ASM_NOTE "    .section .note.GNU-stack,\"\",@progbits\n")
 endif()
 file(WRITE ${DOCS_MODEL_ASM}
   "    .section ${DOCS_MODEL_SECTION}\n"
@@ -161,7 +151,8 @@ file(WRITE ${DOCS_MODEL_ASM}
   "    .globl ${DOCS_MODEL_SYMBOL_PREFIX}docs_model_gguf_end\n"
   "${DOCS_MODEL_SYMBOL_PREFIX}docs_model_gguf_start:\n"
   "    .incbin \"${DOCS_EMBED_MODEL_FILE}\"\n"
-  "${DOCS_MODEL_SYMBOL_PREFIX}docs_model_gguf_end:\n")
+  "${DOCS_MODEL_SYMBOL_PREFIX}docs_model_gguf_end:\n"
+  "${DOCS_ASM_NOTE}")
 target_sources(docs PRIVATE ${DOCS_MODEL_ASM})
 set_source_files_properties(${DOCS_MODEL_ASM} PROPERTIES
   OBJECT_DEPENDS ${DOCS_EMBED_MODEL_FILE})
@@ -170,6 +161,27 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
 target_compile_definitions(docs_core PRIVATE
   DOCS_EMBEDDED_MODEL_SHA1="${DOCS_EMBEDDED_MODEL_SHA1}")
 message(STATUS "Embedding semantic model ${DOCS_EMBED_MODEL_FILE}")
+
+# The answer model stays a separate file next to the binary. It is copied there
+# after a successful build when it is present in the source tree, and answer
+# mode loads it lazily on first use. A checkout without it can still build the
+# search front end.
+set(DOCS_ANSWER_MODEL_FILE ${CMAKE_CURRENT_SOURCE_DIR}/MiniCPM5-1B-Q4_K_M.gguf)
+if(EXISTS ${DOCS_ANSWER_MODEL_FILE})
+  add_custom_command(TARGET docs POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      ${DOCS_ANSWER_MODEL_FILE} $<TARGET_FILE_DIR:docs>
+    COMMENT "Copying MiniCPM5 answer model next to the docs binary"
+    VERBATIM)
+  install(FILES ${DOCS_ANSWER_MODEL_FILE} DESTINATION ${CMAKE_INSTALL_BINDIR})
+  message(STATUS "Answer model ${DOCS_ANSWER_MODEL_FILE} is kept next to the binary")
+else()
+  message(WARNING
+    "Answer model not found: ${DOCS_ANSWER_MODEL_FILE}\n"
+    "The build succeeds; answer mode will download the model on first use.")
+endif()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+  ${DOCS_ANSWER_MODEL_FILE})
 
 if(DOCS_LINK_OPTIONS)
   target_link_options(docs PRIVATE ${DOCS_LINK_OPTIONS})

@@ -20,6 +20,8 @@ struct SemanticDocument {
 struct SemanticHit {
 	uint8_t type = 0;
 	uint32_t page_id = 0;
+	//! Index into the semantic document vector, identifying the matched chunk.
+	std::size_t document_id = 0;
 	float score = 0;
 };
 

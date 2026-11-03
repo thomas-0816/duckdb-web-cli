@@ -8,6 +8,15 @@
 
 namespace docs {
 
+//! Build a Markdown list of the source pages behind an answer. Pages that
+//! contributed more than one excerpt are linked once.
+std::string BuildAnswerSources(const std::vector<SearchResult> &results);
+
+//! Stream an answer for `query` in the interactive answer view, preparing the
+//! model first when needed. The caller must be on a terminal. Returns true when
+//! the user asked to quit the application.
+bool RunAnswer(const char *label, const std::string &query, const std::vector<SearchResult> &results, bool color);
+
 //! Show search results one page at a time on an interactive terminal.
 //!
 //! Up/Down (or j/k) scroll within the current result, Left/Right (or p/n)

@@ -574,6 +574,7 @@ bool LookupPathInCorpus(const Corpus &corpus, const std::string &path, bool blog
 	result.content = BuildPageContent(corpus, page);
 	result.score = 0;
 	result.title = blog ? "Blog: " + page.title : page.title;
+	result.url = "https://duckdb.org" + page.anchor;
 	return true;
 }
 
@@ -607,7 +608,8 @@ std::vector<SearchResult> LatestBlogPosts(const Corpus &blog, idx_t limit) {
 	std::vector<SearchResult> results;
 	results.reserve(pages.size());
 	for (auto page : pages) {
-		results.push_back({BuildPageContent(blog, *page), 0.0, "Blog: " + page->title});
+		auto url = "https://duckdb.org" + page->anchor;
+		results.push_back({BuildPageContent(blog, *page), 0.0, "Blog: " + page->title, std::string(), std::move(url)});
 	}
 	return results;
 }
@@ -617,8 +619,8 @@ std::vector<SearchResult> LatestBlogPosts(const Corpus &blog, idx_t limit) {
 //===--------------------------------------------------------------------===//
 
 std::string CleanMarkdownForEmbedding(const std::string &line) {
-	// Drop link destinations and image markup; keep the human-readable label so
-	// that prose and code remain close to what a reader sees.
+	// Drop link destinations, image markup, and explicit heading anchors. Keep
+	// code fences and table syntax so answer blocks still render as Markdown.
 	std::string result;
 	result.reserve(line.size());
 	for (std::size_t position = 0; position < line.size();) {
@@ -652,10 +654,6 @@ std::string CleanMarkdownForEmbedding(const std::string &line) {
 				continue;
 			}
 		}
-		if (line[position] == '`') {
-			position++;
-			continue;
-		}
 		result.push_back(line[position++]);
 	}
 	while (!result.empty() && (result.back() == ' ' || result.back() == '\t')) {
@@ -682,35 +680,149 @@ std::string TrimMarkdownText(const std::string &text) {
 
 std::vector<std::string> ChunkSemanticText(const std::string &prefix, const std::string &body) {
 	constexpr std::size_t MAX_CHARS = 1800;
-	constexpr std::size_t OVERLAP = 200;
 
 	auto trimmed = TrimMarkdownText(body);
 	if (trimmed.empty()) {
 		return {prefix};
 	}
-	if (prefix.size() + 1 + trimmed.size() <= MAX_CHARS) {
-		return {prefix + "\n" + trimmed};
+	if (prefix.size() + 2 + trimmed.size() <= MAX_CHARS) {
+		return {prefix + "\n\n" + trimmed};
 	}
 
-	auto budget = MAX_CHARS > prefix.size() + 1 ? MAX_CHARS - prefix.size() - 1 : MAX_CHARS / 2;
-	std::vector<std::string> chunks;
-	std::size_t start = 0;
-	while (start < trimmed.size()) {
-		auto end = std::min(trimmed.size(), start + budget);
-		if (end < trimmed.size()) {
-			auto newline = trimmed.rfind('\n', end);
-			if (newline != std::string::npos && newline > start + budget / 2) {
-				end = newline;
-			}
+	auto budget = MAX_CHARS > prefix.size() + 2 ? MAX_CHARS - prefix.size() - 2 : MAX_CHARS / 2;
+
+	std::vector<std::string> lines;
+	for (std::size_t start = 0; start <= trimmed.size();) {
+		auto end = trimmed.find('\n', start);
+		if (end == std::string::npos) {
+			end = trimmed.size();
 		}
-		auto chunk = TrimMarkdownText(trimmed.substr(start, end - start));
-		if (!chunk.empty()) {
-			chunks.push_back(prefix + "\n" + chunk);
-		}
-		if (end >= trimmed.size()) {
+		lines.push_back(trimmed.substr(start, end - start));
+		if (end == trimmed.size()) {
 			break;
 		}
-		start = end > OVERLAP ? end - OVERLAP : end;
+		start = end + 1;
+	}
+
+	auto fence_line = [](const std::string &line, char &marker, std::size_t &run, bool &closing) {
+		std::size_t indent = 0;
+		while (indent < line.size() && indent < 4 && line[indent] == ' ') {
+			indent++;
+		}
+		std::size_t position = indent;
+		while (position < line.size() && (line[position] == '`' || line[position] == '~')) {
+			position++;
+		}
+		run = position - indent;
+		if (run < 3) {
+			return false;
+		}
+		marker = line[indent];
+		closing = true;
+		for (std::size_t i = position; i < line.size(); i++) {
+			if (line[i] != ' ' && line[i] != '\t') {
+				closing = false;
+				break;
+			}
+		}
+		return true;
+	};
+
+	std::vector<bool> fence_open(lines.size(), false);
+	std::vector<bool> fence_close(lines.size(), false);
+	std::vector<bool> in_fence(lines.size(), false);
+	bool inside_fence = false;
+	char fence_marker = 0;
+	std::size_t fence_run = 0;
+	for (std::size_t i = 0; i < lines.size(); i++) {
+		char marker = 0;
+		std::size_t run = 0;
+		bool closing = false;
+		if (fence_line(lines[i], marker, run, closing)) {
+			if (!inside_fence) {
+				inside_fence = true;
+				fence_marker = marker;
+				fence_run = run;
+				fence_open[i] = true;
+			} else if (marker == fence_marker && run >= fence_run && closing) {
+				inside_fence = false;
+				fence_close[i] = true;
+			}
+		}
+		in_fence[i] = inside_fence || fence_open[i] || fence_close[i];
+	}
+
+	std::vector<bool> table_row(lines.size(), false);
+	for (std::size_t i = 0; i < lines.size(); i++) {
+		std::size_t indent = 0;
+		while (indent < lines[i].size() && indent < 4 && lines[i][indent] == ' ') {
+			indent++;
+		}
+		table_row[i] = indent < lines[i].size() && lines[i][indent] == '|';
+	}
+	std::vector<std::size_t> table_start(lines.size(), std::string::npos);
+	for (std::size_t i = 0; i < lines.size(); i++) {
+		if (table_row[i]) {
+			table_start[i] = i > 0 && table_row[i - 1] ? table_start[i - 1] : i;
+		}
+	}
+
+	auto line_length = [&](std::size_t i) { return lines[i].size() + 1; };
+
+	std::vector<std::string> chunks;
+	std::size_t start = 0;
+	while (start < lines.size()) {
+		std::size_t end = start;
+		std::size_t length = 0;
+		std::size_t header_start = std::string::npos;
+		std::size_t header_end = 0;
+		if (table_row[start]) {
+			header_start = table_start[start];
+			header_end = std::min(start, header_start + 2);
+			for (std::size_t i = header_start; i < header_end; i++) {
+				length += line_length(i);
+			}
+		}
+		while (end < lines.size()) {
+			auto next = line_length(end);
+			if (end > start && length + next > budget) {
+				break;
+			}
+			length += next;
+			end++;
+		}
+		if (end == start) {
+			end = start + 1;
+		}
+		if (end > start && in_fence[end - 1] && !fence_close[end - 1]) {
+			while (end < lines.size() && !fence_close[end]) {
+				end++;
+			}
+			if (end < lines.size()) {
+				end++;
+			}
+		}
+
+		std::string chunk;
+		if (header_start != std::string::npos) {
+			for (std::size_t i = header_start; i < header_end; i++) {
+				if (!chunk.empty()) {
+					chunk += '\n';
+				}
+				chunk += lines[i];
+			}
+		}
+		for (std::size_t i = start; i < end; i++) {
+			if (!chunk.empty()) {
+				chunk += '\n';
+			}
+			chunk += lines[i];
+		}
+		chunk = TrimMarkdownText(chunk);
+		if (!chunk.empty()) {
+			chunks.push_back(prefix + "\n\n" + chunk);
+		}
+		start = end;
 	}
 	return chunks;
 }
@@ -726,9 +838,6 @@ void BuildSemanticDocuments(const Corpus &corpus, uint8_t type, std::vector<Sema
 		std::string body;
 		for (auto line = start_line; line < end_line; line++) {
 			auto cleaned = CleanMarkdownForEmbedding(corpus.lines[line]);
-			if (cleaned.empty()) {
-				continue;
-			}
 			if (!body.empty()) {
 				body += '\n';
 			}
@@ -912,7 +1021,7 @@ SemanticCorpusCache &GetSemanticCorpusCache(const Corpus *manual, const Corpus *
 		if (blog) {
 			BuildSemanticDocuments(*blog, 1, cache.documents);
 		}
-		cache.fingerprint = "semantic-v2";
+		cache.fingerprint = "semantic-v4";
 		if (manual) {
 			cache.fingerprint += "|docs:" + Sha1HexDigest(manual->data);
 		}
@@ -997,7 +1106,48 @@ std::vector<SearchResult> SearchSemanticCorpora(const Corpus *manual, const Corp
 		auto corpus = entry.type == 1 ? blog : manual;
 		auto &page = corpus->pages[entry.page_id];
 		auto title = entry.type == 1 ? "Blog: " + page.title : page.title;
-		results.push_back({BuildPageContent(*corpus, page), entry.score, std::move(title), correction});
+		auto url = "https://duckdb.org" + page.anchor;
+		results.push_back({BuildPageContent(*corpus, page), entry.score, std::move(title), correction,
+		                   std::move(url)});
+	}
+	return results;
+}
+
+std::vector<SearchResult> SearchAnswerBlocksCorpora(const Corpus *manual, const Corpus *blog,
+                                                    const std::string &query, idx_t limit, uint8_t mode) {
+	if (limit == 0) {
+		return {};
+	}
+	auto &cache = GetSemanticCorpusCache(manual, blog);
+	auto corrected_query = CorrectQuery(query, cache.vocabulary);
+	auto correction = corrected_query != query ? corrected_query : std::string();
+
+	auto wanted = [&](uint8_t type) { return mode == 2 || type == mode; };
+	auto candidates = std::max<idx_t>(limit * 16, 128);
+	candidates = std::min<idx_t>(candidates, 2000);
+	auto hits = SearchSemantic(cache.documents, cache.fingerprint, corrected_query, candidates);
+
+	std::vector<SearchResult> results;
+	results.reserve(std::min(limit, hits.size()));
+	for (auto &hit : hits) {
+		if (!wanted(hit.type)) {
+			continue;
+		}
+		if (hit.document_id >= cache.documents.size()) {
+			continue;
+		}
+		auto corpus = hit.type == 1 ? blog : manual;
+		if (!corpus || hit.page_id >= corpus->pages.size()) {
+			continue;
+		}
+		auto &page = corpus->pages[hit.page_id];
+		auto title = hit.type == 1 ? "Blog: " + page.title : page.title;
+		auto url = "https://duckdb.org" + page.anchor;
+		results.push_back({cache.documents[hit.document_id].text, hit.score, std::move(title), correction,
+		                   std::move(url)});
+		if (results.size() >= limit) {
+			break;
+		}
 	}
 	return results;
 }
@@ -1074,6 +1224,15 @@ std::vector<SearchResult> SearchAll(const std::string &query, idx_t limit) {
 	}
 	auto &manual = GetManualCorpus();
 	return SearchCorpora(&manual, &blog, query, limit, 2);
+}
+
+std::vector<SearchResult> SearchAnswerBlocks(const std::string &query, idx_t limit) {
+	if (!SemanticModelAvailable()) {
+		throw std::runtime_error("Semantic search is unavailable: the embedding model could not be loaded");
+	}
+	auto &manual = GetManualCorpus();
+	auto &blog = GetBlogCorpus();
+	return SearchAnswerBlocksCorpora(&manual, &blog, query, limit, 2);
 }
 
 void PrepareSemanticSearch(const std::string &query, bool force) {

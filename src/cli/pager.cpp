@@ -1,6 +1,7 @@
 #include "cli/pager.hpp"
 
 #include "cli/markdown.hpp"
+#include "generation.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -328,8 +329,77 @@ struct PagerPage {
 	double score = 0;
 };
 
+struct PageLinkRef {
+	std::size_t line = 0;
+	cli::TextLink link;
+};
+
+//! Links of a page in reading order, used for keyboard selection.
+std::vector<PageLinkRef> CollectPageLinks(const PagerPage &page) {
+	std::vector<PageLinkRef> links;
+	for (std::size_t line = 0; line < page.content_links.size(); line++) {
+		for (auto &link : page.content_links[line]) {
+			links.push_back({line, link});
+		}
+	}
+	return links;
+}
+
+//! Rendered links that should always open in the browser, even when their
+//! target also exists in the bundled corpus. The marker keeps internal page
+//! lookup from resolving them back to the same stub page.
+constexpr const char *EXTERNAL_LINK_SUFFIX = "#external";
+
+bool IsExternalLink(const std::string &url) {
+	auto size = std::char_traits<char>::length(EXTERNAL_LINK_SUFFIX);
+	return url.size() >= size && url.compare(url.size() - size, size, EXTERNAL_LINK_SUFFIX) == 0;
+}
+
+std::string ExternalLinkTarget(const std::string &url) {
+	if (!IsExternalLink(url)) {
+		return url;
+	}
+	return url.substr(0, url.size() - std::char_traits<char>::length(EXTERNAL_LINK_SUFFIX));
+}
+
+//! Some blog pages in the corpus are redirect stubs: they only carry the
+//! title, publication date, author and TL;DR. The full article lives on the
+//! page the website redirects to, so offer a link to it.
+bool IsRedirectStub(const SearchResult &result) {
+	if (result.url.empty()) {
+		return false;
+	}
+	bool has_date = false;
+	bool has_tldr = false;
+	std::size_t body_lines = 0;
+	std::size_t start = 0;
+	while (start < result.content.size()) {
+		auto end = result.content.find('\n', start);
+		if (end == std::string::npos) {
+			end = result.content.size();
+		}
+		auto line = result.content.substr(start, end - start);
+		auto first = line.find_first_not_of(" \t\r");
+		if (first != std::string::npos) {
+			body_lines++;
+			auto trimmed = line.substr(first);
+			if (trimmed.rfind("**Publication date:**", 0) == 0) {
+				has_date = true;
+			} else if (trimmed.rfind("**TL;DR:**", 0) == 0) {
+				has_tldr = true;
+			}
+		}
+		start = end + 1;
+	}
+	return has_date && has_tldr && body_lines <= 5;
+}
+
 void AppendPageContent(PagerPage &page, const SearchResult &result, bool color, bool raw, int columns) {
-	auto content = raw ? result.content : cli::RenderMarkdown(result.content, color);
+	auto source = result.content;
+	if (IsRedirectStub(result)) {
+		source += "\n\n[Open the original post](" + result.url + EXTERNAL_LINK_SUFFIX + ")";
+	}
+	auto content = raw ? source : cli::RenderMarkdown(source, color);
 	std::size_t start = 0;
 	auto wrap_width = static_cast<std::size_t>(std::max(columns, 1));
 	while (start < content.size()) {
@@ -801,7 +871,7 @@ std::string MakeStatus(std::size_t index, std::size_t total, std::size_t top, st
 	if (!internal) {
 		status += "  |  Left/Right result";
 	} else {
-		status += "  |  Enter/Esc back";
+		status += "  |  Left/Right link  |  Enter/Esc back";
 	}
 	status += "  |  q quit";
 	auto limit = static_cast<std::size_t>(std::max(columns - 1, 1));
@@ -812,7 +882,9 @@ std::string MakeStatus(std::size_t index, std::size_t total, std::size_t top, st
 }
 
 void Draw(const std::vector<PagerPage> &pages, std::size_t index, std::size_t &scroll, bool color,
-          const std::string &page_query = std::string(), bool internal = false) {
+          const std::string &page_query = std::string(), bool internal = false,
+          const std::string &custom_status = std::string(), std::size_t selected_line = std::size_t(-1),
+          const cli::TextLink *selected_link = nullptr) {
 	auto size = GetTerminalSize();
 	int rows = std::max(size.rows, 3);
 	int columns = std::max(size.columns, 20);
@@ -839,7 +911,16 @@ void Draw(const std::vector<PagerPage> &pages, std::size_t index, std::size_t &s
 	for (std::size_t row = 0; row < available; row++) {
 		if (scroll + row < page.content.size()) {
 			auto &line = page.content[scroll + row];
-			if (color && !page_query.empty()) {
+			if (selected_link && scroll + row == selected_line) {
+				auto plain = MakePlainLine(line);
+				auto start = std::min(selected_link->start, plain.offsets.size());
+				auto end = std::min(selected_link->end, plain.offsets.size());
+				if (end > start) {
+					output += HighlightPlainMatches(line, plain, {{start, end}});
+				} else {
+					output += line;
+				}
+			} else if (color && !page_query.empty()) {
 				auto plain = MakePlainLine(line);
 				auto matches = FindPlainMatches(plain.text, page_query);
 				output += HighlightPlainMatches(line, plain, matches);
@@ -853,7 +934,9 @@ void Draw(const std::vector<PagerPage> &pages, std::size_t index, std::size_t &s
 	if (color) {
 		output += "\x1b[7m";
 	}
-	auto status = MakeStatus(index, pages.size(), scroll, visible, page.content.size(), columns, page_query, internal);
+	auto status = custom_status.empty()
+	                  ? MakeStatus(index, pages.size(), scroll, visible, page.content.size(), columns, page_query, internal)
+	                  : TruncatePlain(custom_status, static_cast<std::size_t>(std::max(columns - 1, 1)));
 	auto status_limit = static_cast<std::size_t>(std::max(columns - 1, 1));
 	if (status.size() < status_limit) {
 		status.append(status_limit - status.size(), ' ');
@@ -884,6 +967,44 @@ LiveSearchLayout MakeLiveSearchLayout(const std::vector<SearchResult> &results, 
 	layout.list_start = 2 + extra_rows;
 	layout.list_rows = static_cast<std::size_t>(std::max(rows - 3 - extra_rows, 1));
 	return layout;
+}
+
+void DrawAnswerLoading(const char *label, float progress, const std::string &message, bool color) {
+	auto terminal = GetTerminalSize();
+	int columns = std::max(terminal.columns, 20);
+	auto width_limit = static_cast<std::size_t>(std::max(columns - 1, 1));
+	auto percent = static_cast<int>(std::max(0.0f, std::min(1.0f, progress)) * 100.0f + 0.5f);
+
+	std::string output = "\x1b[H";
+	if (color) {
+		output += BOLD;
+	}
+	output += label;
+	output += "> ";
+	if (color) {
+		output += RESET;
+	}
+	output += "Answer model";
+	output += "\x1b[K\n";
+
+	if (color) {
+		output += DIM;
+	}
+	output += message;
+	if (color) {
+		output += RESET;
+	}
+	output += "\x1b[K\n";
+
+	auto bar_width = static_cast<std::size_t>(std::max(10, std::min(44, columns - 12)));
+	auto filled = static_cast<std::size_t>(percent) * bar_width / 100;
+	std::string bar = "[";
+	bar.append(filled, '#');
+	bar.append(bar_width - filled, ' ');
+	bar += "] " + std::to_string(percent) + "%";
+	output += TruncatePlain(bar, width_limit);
+	output += "\x1b[K\n\x1b[J";
+	std::cout << output << std::flush;
 }
 
 void DrawLiveSearch(const char *label, const std::string &query, std::size_t cursor,
@@ -924,7 +1045,10 @@ void DrawLiveSearch(const char *label, const std::string &query, std::size_t cur
 	if (selected >= list_rows) {
 		first = selected - list_rows + 1;
 	}
-	auto entry_count = results.size() + 1;
+	auto show_answer = !results.empty();
+	auto answer_index = results.size();
+	auto quit_index = results.size() + (show_answer ? 1 : 0);
+	auto entry_count = quit_index + 1;
 	for (std::size_t row = 0; row < list_rows; row++) {
 		auto position = first + row;
 		std::string line;
@@ -933,7 +1057,10 @@ void DrawLiveSearch(const char *label, const std::string &query, std::size_t cur
 			line = std::to_string(position + 1) + ". " + PlainTitle(results[position].title);
 			line = TruncatePlain(line, width_limit);
 			active = position == selected;
-		} else if (position < entry_count) {
+		} else if (show_answer && position == answer_index) {
+			line = std::to_string(position + 1) + ". Answer with LLM";
+			active = position == selected;
+		} else if (position == quit_index) {
 			line = std::to_string(position + 1) + ". Quit";
 			active = position == selected;
 		}
@@ -955,13 +1082,13 @@ void DrawLiveSearch(const char *label, const std::string &query, std::size_t cur
 	if (!error.empty()) {
 		status = "Error: " + error;
 	} else if (query.empty()) {
-		status = std::string("Type to search ") + label + "  |  Esc quit";
+		status = "Type to search  |  Up/Down select  |  Esc quit";
 	} else if (results.empty()) {
-		status = std::string("No ") + label + " results  |  Esc quit";
+		status = "No search results  |  Esc quit";
 	} else {
+		auto enter = from_pager ? "Enter apply" : "Enter open";
 		status = std::to_string(results.size()) + (results.size() == 1 ? " result" : " results") +
-		         (from_pager ? "  |  Up/Down select  |  Enter apply  |  Esc quit"
-		                     : "  |  Up/Down select  |  Enter open  |  Esc quit");
+		         "  |  Up/Down select  |  " + enter + "  |  Esc quit";
 	}
 	auto status_limit = static_cast<std::size_t>(std::max(columns - 1, 1));
 	status = TruncatePlain(status, status_limit);
@@ -1135,6 +1262,11 @@ FindEdit EditFind(const std::string &initial_query, bool color) {
 	}
 }
 
+//! Stream an answer for `query` using the best-matching content blocks, then
+//! show the completed answer in a scrollable page. Returns true when the user
+//! asked to quit the application.
+bool ShowAnswer(const char *label, const std::string &query, const std::vector<SearchResult> &results, bool color);
+
 QueryEdit EditQuery(const char *label, SearchFunction search, idx_t limit, const std::string &initial_query,
                     const std::vector<SearchResult> &initial_results, std::size_t initial_selected, bool color,
                     bool from_pager) {
@@ -1142,9 +1274,10 @@ QueryEdit EditQuery(const char *label, SearchFunction search, idx_t limit, const
 	edit.query = initial_query;
 	edit.cursor = edit.query.size();
 	edit.results = initial_results;
-	// The last entry is always the "Quit" action, so the selection can point
-	// one past the search results.
-	edit.selected = std::min(initial_selected, edit.results.size());
+	// The entries after the results are "Answer with LLM" (when there are
+	// results) and "Quit".
+	auto last_entry = edit.results.empty() ? std::size_t(0) : edit.results.size() + 1;
+	edit.selected = std::min(initial_selected, last_entry);
 	std::string error;
 	// An empty search shows the latest blog posts, so the initial screen must
 	// be populated even before the first keystroke.
@@ -1189,34 +1322,86 @@ QueryEdit EditQuery(const char *label, SearchFunction search, idx_t limit, const
 						}
 						auto position =
 						    first + static_cast<std::size_t>(row - static_cast<int>(layout.list_start));
+						auto show_answer = !edit.results.empty();
+						auto answer_index = edit.results.size();
+						auto quit_index = edit.results.size() + (show_answer ? 1 : 0);
 						if (position < edit.results.size()) {
 							edit.selected = position;
 							edit.accepted = true;
 							return edit;
 						}
-						if (position == edit.results.size()) {
-							// The Quit row was clicked.
+						if (show_answer && position == answer_index) {
+							// Let the Enter handler below start the answer.
+							edit.selected = position;
+							key = '\r';
+						} else if (position == quit_index) {
 							return edit;
 						}
 					}
 				}
-				continue;
+				if (key == KEY_MOUSE) {
+					continue;
+				}
 			}
 			if (key == '\r' || key == '\n') {
-				if (edit.selected == edit.results.size()) {
-					// The Quit row was activated.
+				auto show_answer = !edit.results.empty();
+				auto answer_index = edit.results.size();
+				auto quit_index = edit.results.size() + (show_answer ? 1 : 0);
+				if (show_answer && edit.selected == answer_index) {
+					if (edit.query.empty()) {
+						error = "Type a question to answer";
+						continue;
+					}
+					std::vector<SearchResult> answer_blocks;
+					try {
+						answer_blocks = SearchAnswerBlocks(edit.query, ANSWER_RESULT_COUNT);
+					} catch (const std::exception &exception) {
+						error = exception.what();
+						continue;
+					}
+					if (answer_blocks.empty()) {
+						error = "No matching documentation content for '" + edit.query + "'";
+						continue;
+					}
+					if (!AnswerModelLoaded()) {
+						error.clear();
+						int last_percent = -1;
+						DrawAnswerLoading(label, 0.0f, "Preparing the answer model...", color);
+						try {
+							PrepareAnswerModel([&](float progress, const std::string &status) {
+								auto percent = static_cast<int>(progress * 100.0f + 0.5f);
+								if (percent != last_percent) {
+									last_percent = percent;
+									DrawAnswerLoading(label, progress, status, color);
+								}
+							});
+						} catch (const std::exception &exception) {
+							error = exception.what();
+							continue;
+						}
+					}
+					if (ShowAnswer(label, edit.query, answer_blocks, color)) {
+						break;
+					}
+					error.clear();
+					continue;
+				}
+				if (edit.selected >= quit_index) {
 					break;
+				}
+				if (edit.selected >= edit.results.size()) {
+					continue;
 				}
 				edit.accepted = true;
 				return edit;
 			}
 			if (key == KEY_UP || key == KEY_WHEEL_UP) {
-				auto entry_count = edit.results.size() + 1;
+				auto entry_count = edit.results.size() + (edit.results.empty() ? 1 : 2);
 				edit.selected = (edit.selected + entry_count - 1) % entry_count;
 				continue;
 			}
 			if (key == KEY_DOWN || key == KEY_WHEEL_DOWN) {
-				auto entry_count = edit.results.size() + 1;
+				auto entry_count = edit.results.size() + (edit.results.empty() ? 1 : 2);
 				edit.selected = (edit.selected + 1) % entry_count;
 				continue;
 			}
@@ -1281,9 +1466,21 @@ bool RunInternalPage(const char *label, const SearchResult &result, bool color, 
 	std::vector<PagerPage> pages;
 	auto size = GetTerminalSize();
 	pages.push_back(BuildInternalPage(result, color, raw, size.columns));
+	auto links = CollectPageLinks(pages[0]);
+	std::size_t selected_link = std::size_t(-1);
 	std::size_t scroll = 0;
 	std::string page_query;
 	Draw(pages, 0, scroll, color, page_query, true);
+
+	auto open_link = [&](const cli::TextLink &link) -> bool {
+		SearchResult target;
+		auto url = ExternalLinkTarget(link.url);
+		if (!IsExternalLink(link.url) && LookupPageByUrl(url, target)) {
+			return RunInternalPage(label, target, color, raw);
+		}
+		OpenUrl(url);
+		return false;
+	};
 
 	while (true) {
 		int key = ReadKey();
@@ -1302,9 +1499,53 @@ bool RunInternalPage(const char *label, const SearchResult &result, bool color, 
 		case 3:
 			return true;
 		case 27:
+			if (selected_link < links.size()) {
+				selected_link = std::size_t(-1);
+				break;
+			}
+			return false;
 		case '\r':
 		case '\n':
+			if (selected_link < links.size()) {
+				if (open_link(links[selected_link].link)) {
+					return true;
+				}
+				break;
+			}
 			return false;
+		case KEY_LEFT:
+			if (links.empty()) {
+				redraw = false;
+				break;
+			}
+			selected_link =
+			    selected_link >= links.size() ? links.size() - 1 : (selected_link + links.size() - 1) % links.size();
+			{
+				auto line = links[selected_link].line;
+				if (line < scroll) {
+					scroll = line;
+				} else if (line >= scroll + available) {
+					scroll = line - available + 1;
+				}
+				scroll = std::min(scroll, max_scroll);
+			}
+			break;
+		case KEY_RIGHT:
+			if (links.empty()) {
+				redraw = false;
+				break;
+			}
+			selected_link = selected_link >= links.size() ? 0 : (selected_link + 1) % links.size();
+			{
+				auto line = links[selected_link].line;
+				if (line < scroll) {
+					scroll = line;
+				} else if (line >= scroll + available) {
+					scroll = line - available + 1;
+				}
+				scroll = std::min(scroll, max_scroll);
+			}
+			break;
 		case '/': {
 			auto find = EditFind(std::string(), color);
 			if (find.accepted) {
@@ -1401,22 +1642,19 @@ bool RunInternalPage(const char *label, const SearchResult &result, bool color, 
 				break;
 			}
 			auto line = scroll + static_cast<std::size_t>(content_row);
+			bool opened = false;
 			if (line < page.content_links.size()) {
 				for (auto &link : page.content_links[line]) {
 					if (column >= link.start && column < link.end) {
-						SearchResult target;
-						if (LookupPageByUrl(link.url, target)) {
-							if (RunInternalPage(label, target, color, raw)) {
-								return true;
-							}
-						} else {
-							OpenUrl(link.url);
+						opened = true;
+						if (open_link(link)) {
+							return true;
 						}
 						break;
 					}
 				}
 			}
-			redraw = true;
+			redraw = opened;
 			break;
 		}
 		default:
@@ -1425,12 +1663,292 @@ bool RunInternalPage(const char *label, const SearchResult &result, bool color, 
 		}
 
 		if (redraw) {
-			Draw(pages, 0, scroll, color, page_query, true);
+			const cli::TextLink *highlight = nullptr;
+			std::size_t highlight_line = std::size_t(-1);
+			std::string status;
+			if (selected_link < links.size()) {
+				highlight = &links[selected_link].link;
+				highlight_line = links[selected_link].line;
+				auto plain = MakePlainLine(page.content[highlight_line]);
+				auto start = std::min(highlight->start, plain.text.size());
+				auto end = std::min(highlight->end, plain.text.size());
+				auto text = plain.text.substr(start, end - start);
+				status = "Link " + std::to_string(selected_link + 1) + "/" + std::to_string(links.size()) + ": " +
+				         text + "  |  Enter open  |  Left/Right select  |  Esc clear";
+			}
+			Draw(pages, 0, scroll, color, page_query, true, status, highlight_line, highlight);
 		}
 	}
 }
 
+std::string ComposeLiveAnswer(const std::string &reasoning, const std::string &answer) {
+	std::string content;
+	if (!reasoning.empty()) {
+		content += "### Reasoning\n\n";
+		content += reasoning;
+		if (content.back() != '\n') {
+			content += '\n';
+		}
+		content += '\n';
+	}
+	content += "### Answer\n\n";
+	if (answer.empty()) {
+		content += "*Waiting for the answer...*";
+	} else {
+		content += answer;
+	}
+	return content;
+}
+
+std::string ComposeAnswerContent(const std::string &reasoning, const std::string &answer, bool cancelled,
+                                 const std::string &error) {
+	std::string content;
+	if (!reasoning.empty()) {
+		content += "### Reasoning\n\n";
+		content += reasoning;
+		if (content.back() != '\n') {
+			content += '\n';
+		}
+		content += '\n';
+	}
+	content += "### Answer\n\n";
+	if (!answer.empty()) {
+		content += answer;
+		if (content.back() != '\n') {
+			content += '\n';
+		}
+	} else if (error.empty() && !cancelled) {
+		content += "The model did not return an answer.\n";
+	}
+	if (cancelled) {
+		content += "\n*[stopped]*\n";
+	}
+	if (!error.empty()) {
+		content += "\n**Error:** " + error + "\n";
+	}
+	return content;
+}
+
+std::string EscapeMarkdownLinkText(const std::string &text) {
+	std::string result;
+	result.reserve(text.size());
+	for (auto c : text) {
+		if (c == '\\' || c == '[' || c == ']') {
+			result.push_back('\\');
+		}
+		result.push_back(c);
+	}
+	return result;
+}
+
 } // namespace
+
+std::string BuildAnswerSources(const std::vector<SearchResult> &results) {
+	std::string content = "### Sources\n\n";
+	std::vector<std::string> seen;
+	std::size_t shown = 0;
+	for (auto &result : results) {
+		if (!result.url.empty()) {
+			if (std::find(seen.begin(), seen.end(), result.url) != seen.end()) {
+				continue;
+			}
+			seen.push_back(result.url);
+		}
+		shown++;
+		content += std::to_string(shown) + ". ";
+		if (!result.url.empty()) {
+			content += "[" + EscapeMarkdownLinkText(result.title) + "](" + result.url + ")";
+		} else {
+			content += result.title;
+		}
+		content += "\n";
+	}
+	if (shown == 0) {
+		content += "*No source pages available.*\n";
+	}
+	return content;
+}
+
+namespace {
+
+PagerPage BuildAnswerSourcesPage(const std::vector<SearchResult> &results, const std::string &query, bool color,
+                                 int columns) {
+	PagerPage page;
+	SearchResult source;
+	source.content = "\n---\n\n" + BuildAnswerSources(results);
+	source.title = "Sources: " + query;
+	AppendPageContent(page, source, color, false, columns);
+	return page;
+}
+
+struct BuiltAnswerPage {
+	PagerPage page;
+	std::size_t answer_lines = 0;
+};
+
+BuiltAnswerPage BuildAnswerPage(const std::string &reasoning, const std::string &answer, const std::string &query,
+                                const PagerPage *sources_page, bool color, int columns) {
+	auto width_limit = static_cast<std::size_t>(std::max(columns - 1, 1));
+	auto title = PlainTitle(query);
+	auto prefix = std::string("Answer | ");
+	auto title_room = width_limit > prefix.size() ? width_limit - prefix.size() : 0;
+	title = TruncatePlain(title, title_room);
+	std::string label = "Answer";
+	if (color) {
+		label = std::string("\x1b[1;7m") + label + RESET;
+	}
+	PagerPage page;
+	page.header.push_back(label + (title.empty() ? std::string() : " | " + title));
+	AppendPageHeader(page, color, columns);
+	SearchResult result;
+	result.content = ComposeLiveAnswer(reasoning, answer);
+	result.title = "Answer: " + query;
+	AppendPageContent(page, result, color, false, columns);
+	BuiltAnswerPage built;
+	built.answer_lines = page.content.size();
+	if (sources_page) {
+		page.content.insert(page.content.end(), sources_page->content.begin(), sources_page->content.end());
+		page.content_links.insert(page.content_links.end(), sources_page->content_links.begin(),
+		                          sources_page->content_links.end());
+	}
+	built.page = std::move(page);
+	return built;
+}
+
+void DrawAnswerPage(const std::string &reasoning, const std::string &answer, const std::string &query,
+                    const PagerPage *sources_page, bool color,
+                    const std::string &status = "Answering  |  Esc stop  |  q quit") {
+	auto size = GetTerminalSize();
+	auto built = BuildAnswerPage(reasoning, answer, query, sources_page, color, size.columns);
+	auto header_rows = built.page.header.size();
+	auto available = static_cast<std::size_t>(std::max(std::max(size.rows, 3) - static_cast<int>(header_rows) - 1, 1));
+	auto visible = std::min(built.page.content.size(), available);
+	std::size_t scroll = built.answer_lines > available ? built.answer_lines - available : 0;
+	auto max_scroll = built.page.content.size() > visible ? built.page.content.size() - visible : 0;
+	scroll = std::min(scroll, max_scroll);
+	std::vector<PagerPage> pages;
+	pages.push_back(std::move(built.page));
+	Draw(pages, 0, scroll, color, std::string(), true, status);
+}
+
+bool ShowAnswer(const char *label, const std::string &query, const std::vector<SearchResult> &results, bool color) {
+	std::string reasoning;
+	std::string answer;
+	std::string reasoning_pending;
+	std::string answer_pending;
+	bool answer_started = false;
+	bool cancelled = false;
+	bool quit = false;
+	std::string error;
+
+	auto sources = BuildAnswerSources(results);
+	auto sources_columns = GetTerminalSize().columns;
+	auto sources_page = BuildAnswerSourcesPage(results, query, color, sources_columns);
+	auto refresh_sources_page = [&]() {
+		auto columns = GetTerminalSize().columns;
+		if (columns != sources_columns) {
+			sources_columns = columns;
+			sources_page = BuildAnswerSourcesPage(results, query, color, columns);
+		}
+	};
+	auto draw = [&](const std::string &status) {
+		refresh_sources_page();
+		DrawAnswerPage(reasoning, answer, query, &sources_page, color, status);
+	};
+
+	draw("Reading the top 10 matching blocks  |  Please wait");
+	try {
+		GenerateAnswer(query, results, [&](const std::string &piece, bool is_reasoning) {
+			if (!is_reasoning && !answer_started) {
+				// The model has stopped thinking. Drop the reasoning from the live
+				// view so the answer starts at the top of the page.
+				answer_started = true;
+				reasoning.clear();
+				reasoning_pending.clear();
+			}
+			auto &pending = is_reasoning ? reasoning_pending : answer_pending;
+			auto &target = is_reasoning ? reasoning : answer;
+			pending += piece;
+			auto complete = cli::Utf8CompleteLength(pending);
+			if (complete > 0) {
+				target.append(pending, 0, complete);
+				pending.erase(0, complete);
+			}
+			while (WaitForInput(0)) {
+				auto key = ReadKey();
+				if (key == 27 || key == 3) {
+					cancelled = true;
+					return false;
+				}
+				if (key == 'q' || key == 'Q') {
+					quit = true;
+					return false;
+				}
+			}
+			if (complete > 0) {
+				auto status = is_reasoning ? "Thinking  |  Esc stop  |  q quit" : "Answering  |  Esc stop  |  q quit";
+				draw(status);
+			}
+			return true;
+		}, [&](std::size_t done, std::size_t total) {
+			auto percent = total == 0 ? 100 : static_cast<int>((done * 100 + total - 1) / total);
+			constexpr std::size_t BAR_WIDTH = 20;
+			std::string bar(BAR_WIDTH, ' ');
+			std::fill_n(bar.begin(), static_cast<std::size_t>(percent) * BAR_WIDTH / 100, '#');
+			auto status = "Processing prompt [" + bar + "] " + std::to_string(percent) + "%";
+			draw(status);
+		});
+	} catch (const std::exception &exception) {
+		error = exception.what();
+	}
+
+	if (quit) {
+		return true;
+	}
+	if (!reasoning_pending.empty()) {
+		reasoning += reasoning_pending;
+	}
+	if (!answer_pending.empty()) {
+		answer += answer_pending;
+	}
+	if (error.empty() && !cancelled && answer.empty() && !reasoning.empty()) {
+		// The model stopped without a thinking end tag, so the text it produced
+		// is the answer rather than a separate reasoning block.
+		answer = std::move(reasoning);
+		reasoning.clear();
+	}
+
+	auto content = ComposeAnswerContent(reasoning, answer, cancelled, error);
+	if (!content.empty() && content.back() != '\n') {
+		content += '\n';
+	}
+	content += "\n---\n\n";
+	content += sources;
+
+	SearchResult result;
+	result.content = content;
+	result.title = "Answer: " + query;
+	return RunInternalPage(label, result, color, false);
+}
+
+} // namespace
+
+bool RunAnswer(const char *label, const std::string &query, const std::vector<SearchResult> &results, bool color) {
+	PagerScreen screen(true);
+	RawMode raw_mode;
+	if (!AnswerModelLoaded()) {
+		int last_percent = -1;
+		DrawAnswerLoading(label, 0.0f, "Preparing the answer model...", color);
+		PrepareAnswerModel([&](float progress, const std::string &status) {
+			auto percent = static_cast<int>(progress * 100.0f + 0.5f);
+			if (percent != last_percent) {
+				last_percent = percent;
+				DrawAnswerLoading(label, progress, status, color);
+			}
+		});
+	}
+	return ShowAnswer(label, query, results, color);
+}
 
 int RunPager(const char *label, SearchFunction search, idx_t limit, const std::string &query,
              const std::vector<SearchResult> &results, bool color, bool raw, std::size_t start_index) {
@@ -1641,13 +2159,14 @@ int RunPager(const char *label, SearchFunction search, idx_t limit, const std::s
 							if (column >= link.start && column < link.end) {
 								opened = true;
 								SearchResult target;
-								if (LookupPageByUrl(link.url, target)) {
+								auto url = ExternalLinkTarget(link.url);
+								if (!IsExternalLink(link.url) && LookupPageByUrl(url, target)) {
 									if (RunInternalPage(label, target, color, raw)) {
 										return 0;
 									}
 									redraw = true;
 								} else {
-									OpenUrl(link.url);
+									OpenUrl(url);
 									redraw = false;
 								}
 								break;

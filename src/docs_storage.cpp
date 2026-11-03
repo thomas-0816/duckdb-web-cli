@@ -614,6 +614,88 @@ std::string FormatSize(std::size_t bytes) {
 
 } // namespace
 
+void DownloadFile(const std::string &url, const std::string &destination,
+                  const std::function<void(uint64_t done, uint64_t total)> &progress) {
+	auto scheme_end = url.find("://");
+	auto path_start = scheme_end == std::string::npos ? std::string::npos : url.find('/', scheme_end + 3);
+	if (scheme_end == std::string::npos || path_start == std::string::npos) {
+		throw std::runtime_error("Could not download " + url + ": invalid URL");
+	}
+	auto origin = url.substr(0, path_start);
+	auto path = url.substr(path_start);
+
+	httplib::Client client(origin);
+	client.set_follow_location(true);
+	client.set_connection_timeout(30);
+	client.set_read_timeout(600);
+	client.set_write_timeout(60);
+	client.set_keep_alive(false);
+	client.set_default_headers({{"User-Agent", "duckdb-docs-search/1.0"}});
+
+	// Write to a temporary file first so an interrupted transfer never leaves a
+	// truncated model behind that looks complete.
+	auto temporary = destination + ".part";
+	std::error_code error;
+	auto parent = std::filesystem::path(temporary).parent_path();
+	if (!parent.empty()) {
+		std::filesystem::create_directories(parent, error);
+		if (error) {
+			throw std::runtime_error("Could not create " + parent.string() + ": " + error.message());
+		}
+	}
+
+	std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+	if (!output) {
+		throw std::runtime_error("Could not write " + temporary);
+	}
+	uint64_t written = 0;
+	auto remove_temporary = [&] {
+		output.close();
+		std::remove(temporary.c_str());
+	};
+
+	auto response = client.Get(
+	    path,
+	    [&](const char *data, std::size_t length) {
+		    output.write(data, static_cast<std::streamsize>(length));
+		    if (!output) {
+			    return false;
+		    }
+		    written += length;
+		    return true;
+	    },
+	    [&](std::size_t current, std::size_t total) {
+		    if (progress) {
+			    progress(static_cast<uint64_t>(current), static_cast<uint64_t>(total));
+		    }
+		    return true;
+	    });
+	output.close();
+
+	if (!response) {
+		remove_temporary();
+		throw std::runtime_error("Could not download " + url + ": " + httplib::to_string(response.error()));
+	}
+	if (response->status < 200 || response->status >= 300) {
+		remove_temporary();
+		throw std::runtime_error("Could not download " + url + ": HTTP status " +
+		                         std::to_string(response->status));
+	}
+	if (written == 0) {
+		remove_temporary();
+		throw std::runtime_error("Could not download " + url + ": empty response");
+	}
+
+	std::filesystem::rename(temporary, destination, error);
+	if (error) {
+		remove_temporary();
+		throw std::runtime_error("Could not move the download to " + destination + ": " + error.message());
+	}
+	if (progress) {
+		progress(written, written);
+	}
+}
+
 std::vector<std::string> EnsureCorpusFiles(bool force) {
 	auto &paths = GetDataPaths();
 	std::vector<std::string> downloaded;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -28,6 +29,13 @@ const DataPaths &GetDataPaths();
 //! `force` is set, in which case both are fetched again. Returns the paths of
 //! the files that were downloaded.
 std::vector<std::string> EnsureCorpusFiles(bool force = false);
+
+//! Download `url` to `destination`, streaming the body to disk instead of
+//! keeping it in memory. `progress` receives the number of bytes written and
+//! the expected total (0 when the server does not report a length). The
+//! destination is only replaced once the transfer has completed.
+void DownloadFile(const std::string &url, const std::string &destination,
+                  const std::function<void(uint64_t done, uint64_t total)> &progress = nullptr);
 
 struct CorpusFiles {
 	std::string data;

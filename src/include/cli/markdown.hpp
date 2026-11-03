@@ -32,5 +32,9 @@ std::vector<TextLink> ExtractLinks(const std::string &text);
 //! Split a line into screen-width chunks, preserving ANSI styles and links.
 std::vector<std::string> WrapAnsi(const std::string &text, std::size_t width);
 
+//! Length of the longest prefix of `text` that ends on a complete UTF-8 code
+//! point. An incomplete trailing sequence is not counted.
+std::size_t Utf8CompleteLength(const std::string &text);
+
 } // namespace cli
 } // namespace docs

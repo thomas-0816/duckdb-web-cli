@@ -20,6 +20,7 @@ The program looks for these files in its own directory:
 
 ```text
 docs                                the binary (includes the embedding model)
+MiniCPM5-1B-Q4_K_M.gguf             answer model (optional, used by answer mode)
 duckdb-blog.md                      blog text
 duckdb-docs.md                      documentation text
 ```
@@ -28,7 +29,8 @@ The documentation and blog Markdown files may also be placed under `data/`.
 If either file is missing, it is downloaded automatically from
 `https://blobs.duckdb.org/docs/` at startup; the URL is printed before the
 transfer starts. `docs --update` downloads both files again even when they
-already exist.
+already exist. The answer model is downloaded when `Answer with LLM` is used for
+the first time and the file is missing.
 
 Generated files are written next to the binary, so the whole installation stays
 in one directory and nothing is left behind in `/tmp`. The cache is invalidated
@@ -85,6 +87,7 @@ Options:
     --no-color         Disable colors (same as --color=never)
     --raw              Print the original Markdown without rendering
     --no-pager         Print every result instead of paging interactively
+    --llm              Answer with the local LLM instead of listing results
 -h, --help             Show this help
 ```
 
@@ -98,7 +101,7 @@ Running the program with no query on a terminal opens a full-screen search line
 at the top:
 
 ```text
-docs> parquet
+search> parquet
 ------------------------------------------------------------------------------
 1 Reading and Writing Parquet Files
 2 Querying Parquet Metadata
@@ -106,18 +109,21 @@ docs> parquet
 4 Parquet Encryption
 5 Parquet Tips
 ...
-10 results  |  Up/Down select  Enter open  Esc quit
+11 Answer with LLM
+12 Quit
+10 results  |  Up/Down select  |  Enter open  |  Esc quit
 ```
 
 The empty prompt lists the ten latest blog articles. The search runs again on
-every keystroke. Up/Down selects a result, Enter opens the full-screen pager at
-that result, and a mouse click on a result opens it directly. Esc (or Ctrl-C)
-quits. Left/Right move the cursor within the query, Home/End jump to its start
-or end, and Backspace/Delete remove a character. Ctrl-U clears the query
-(returning to the latest blog articles) and Ctrl-W deletes the previous word.
-The list always ends with a
-`Quit` entry that exits the application when selected. Pass `--no-pager` or
-redirect the output to get the usage message instead.
+every keystroke. Up/Down selects an entry, Enter opens the full-screen pager at
+the selected result, and a mouse click on a result opens it directly. The list
+ends with `Answer with LLM` and `Quit` entries. Select `Answer with LLM` and
+press Enter to ask the local model about the current query; `Quit` exits the
+application. Esc (or Ctrl-C) quits. Left/Right move the cursor within the query,
+Home/End jump to its start or end, and Backspace/Delete remove a character.
+Ctrl-U clears the query (returning to the latest blog articles) and Ctrl-W
+deletes the previous word. Pass `--no-pager` or redirect the output to get the
+usage message instead.
 
 The same search line is available from inside the pager: press Esc to edit the
 current query, type a new one, and press Enter to apply it. Esc in the search
@@ -129,6 +135,60 @@ Pressing `/` followed by Enter repeats the search and moves to the next match,
 wrapping around at the end of the page. While a page search is active, `n` and
 `p` jump to the next and previous match. This is useful on long pages such as
 the list of functions.
+
+## Answer with LLM
+
+Pass `--llm` to answer a query directly instead of listing results:
+
+```sh
+docs --llm "how do I read a parquet file?"
+```
+
+On a terminal, `--llm` opens the same live answer view as the `Answer with LLM`
+entry: the reasoning is shown while the model thinks and hidden once the answer
+starts, and the finished answer can be scrolled. When the output is not a
+terminal, reasoning is streamed under a `Reasoning` heading followed by the
+answer under an `Answer` heading, then the source pages; load and prompt
+progress go to standard error. The flag requires a query; `docs --llm` on its
+own prints an error.
+
+Select `Answer with LLM` in the result list and press Enter. The first use loads
+the MiniCPM5 answer model and shows a progress bar while the weights are read.
+When `MiniCPM5-1B-Q4_K_M.gguf` is missing, it is downloaded from Hugging Face
+first and the same progress bar shows the transfer. The model is a separate GGUF
+file next to the binary and stays loaded for the rest of the session.
+
+The program searches the documentation and blog as usual, takes the ten
+best-matching content blocks (chunks of at most about 1,800 characters, each
+prefixed with its page title), and sends the question together with those blocks
+to `MiniCPM5-1B-Q4_K_M.gguf`. The prompt is rendered with the chat template that
+ships in the model's GGUF metadata, using the Jinja engine in llama.cpp's common
+library, so the special tokens and the thinking block match the model exactly.
+A progress bar is shown while the prompt is being processed, before the first
+token. The source pages are already listed below the answer in the live page.
+The model's reasoning is streamed under
+`Reasoning` while it thinks and is hidden as soon as the answer starts. The
+final answer is streamed under `Answer`. `Esc` stops generation and opens the
+partial answer in a scrollable page; `q` quits. If generation is stopped before
+the answer starts, the partial reasoning stays visible. Once generation has
+finished, the answer page supports the same scrolling and find-in-page keys as
+the documentation pages. Press Left/Right to select a source link, Enter to open
+it, and Esc to clear the selection. Press Esc again to return to the search
+list. A list of links to the source pages is appended below the answer instead
+of the full prompt; pages that contributed more than one excerpt are linked
+once.
+
+```text
+search> how do I read a parquet file?
+...
+11 Answer with LLM
+12 Quit
+```
+
+The answer uses a 16,384-token context. When the ten matching blocks do not fit,
+blocks are dropped from the end and the last remaining block is shortened. The
+question and the model's generation prompt are always kept. Sampling uses a
+temperature of 0.9 and top-p 0.95.
 
 ## Semantic search
 
@@ -146,11 +206,12 @@ semantic index; there is no separate lexical ranking.
 The semantic index is built from the Markdown the first time it is needed. The
 model is the Q8_0 GGUF build of `BAAI/bge-small-en-v1.5`, embedded in the binary
 and loaded through llama.cpp. Every page is cleaned of link markup and split
-into chunks of at most about 1800 characters, then embedded
-with the page title as context. The normalized vectors are stored in an HNSW
-index and searched with cosine similarity. Results are grouped back into
-complete pages, so several matching chunks from the same page still produce one
-result. The index and its metadata are cached next to the other generated
+into chunks of at most about 1800 characters, then embedded with the page title
+as context. Code fences and tables stay intact, and a table header is repeated
+when a chunk starts in the middle of a table. The normalized vectors are stored
+in an HNSW index and searched with cosine similarity. Results are grouped back
+into complete pages, so several matching chunks from the same page still produce
+one result. The index and its metadata are cached next to the other generated
 files:
 
 ```text
@@ -262,8 +323,13 @@ Clicking a link in the page content opens it inside the pager when the target
 page is part of the bundled documentation or blog. This also applies to links
 written for older documentation versions: the local page is shown instead of
 the published URL. The internal view has the same scrolling and find-in-page
-keys; Enter, Esc, or a click on `[Back]` returns to the previous page, and `q`
-or Ctrl-C quits the application.
+keys. Press Left/Right to select a link and Enter to open it; Esc clears the
+selection. Esc or a click on `[Back]` returns to the previous page when no link
+is selected, and `q` or Ctrl-C quits the application.
+
+Blog pages that are only redirect stubs end with an `Open the original post`
+link. The full article lives on the site the DuckDB website redirects to, so the
+link opens it in the browser.
 
 Links to other sites open with the desktop's default handler (`xdg-open` or
 `gio open` on Linux, `open` on macOS). This uses the pager's own mouse handling,
@@ -338,7 +404,8 @@ Requirements:
 - a C99 compiler and a C++17 compiler
 - CMake 3.16 or newer
 - OpenSSL development headers, used to download the Markdown sources over HTTPS
-- the Q8_0 GGUF model file (downloaded by a script and embedded at build time)
+- the Q8_0 embedding model file (downloaded by a script and embedded at build
+  time)
 - on Linux and Windows, the Vulkan SDK (including `glslc`); on macOS, the
   Metal toolchain that ships with Xcode
 
@@ -355,11 +422,17 @@ available, so systems without a usable GPU fall back automatically. On Linux the
 binary links against the Vulkan loader (`libvulkan.so.1`) and uses the installed
 driver at runtime. On x86-64 the build uses `-march=x86-64-v3`, so the resulting
 binary requires AVX2 (Haswell or newer); on ARM it targets the `armv8-a`
-baseline. Fetch the model:
+baseline. The build enables llama.cpp's common library because answer mode uses
+its Jinja engine to apply the chat template from the GGUF metadata. Fetch the
+embedding model:
 
 ```sh
 scripts/fetch_models.sh
 ```
+
+Place `MiniCPM5-1B-Q4_K_M.gguf` in the project root before building to have it
+copied next to the `docs` binary and installed with the program. This is
+optional: when the model is missing, answer mode downloads it on first use.
 
 Then build with CMake:
 
@@ -374,18 +447,21 @@ or with the included convenience Makefile:
 make
 ```
 
-The build produces one binary and copies its source data next to it:
+The build produces the binary and copies its source data next to it:
 
 ```text
 build/release/docs
+build/release/MiniCPM5-1B-Q4_K_M.gguf
 build/release/duckdb-docs.md
 build/release/duckdb-blog.md
 ```
 
 The Linux build with Vulkan shaders is about 84 MB because it contains the Q8_0
-GGUF conversion (~35 MB), llama.cpp, and the compiled GPU shaders. The macOS
-build with Metal is smaller. The model is not the full-precision checkpoint, and
-it is not a separate file in the release folder.
+embedding model (~35 MB), llama.cpp, and the compiled GPU shaders. The macOS
+build with Metal is smaller. The MiniCPM5 answer model (~656 MB) stays a separate
+file next to the binary (`build/release/MiniCPM5-1B-Q4_K_M.gguf`). The embedding
+model is linked into the executable; the answer model is loaded from disk when
+answer mode is opened for the first time.
 
 Run it directly:
 
@@ -406,10 +482,11 @@ or, equivalently:
 cmake --install build/release --prefix "$HOME/.local"
 ```
 
-The install step copies the binary and the two Markdown sources into
-`$HOME/.local/bin`. Make sure that directory is on `PATH`; llama.cpp and the
-embedding model are linked statically, so the only runtime requirement is the
-platform GPU stack. After that, `.system docs "..."` works directly inside the
+The install step copies the binary, the MiniCPM5 answer model, and the two
+Markdown sources into `$HOME/.local/bin`. Make sure that directory is on `PATH`;
+llama.cpp and the embedding model are linked statically, and the answer model is
+loaded from its file next to the binary when answer mode is used. The only
+runtime requirement beyond those files is the platform GPU stack. After that, `.system docs "..."` works directly inside the
 DuckDB shell.
 
 ## How the data is built
