@@ -171,14 +171,15 @@ Enter opens it, and clicking it works as usual. The model's reasoning is streame
 list under `Reasoning` and is hidden as soon as the answer starts. The final
 answer is streamed under `Answer`; there is no separate source list, because
 the search results above are the sources. The cursor stays on the query line:
-typing a character, Backspace, or Delete returns to the search prompt and
-applies that key, so the query can be changed without leaving the view. Use the
-mouse wheel, PgUp/PgDn, or Home/End to scroll the answer; wheel scrolling never
-changes the selected result. `Esc` stops generation; once the answer is
-finished, `Esc` returns to the search list, where `q` quits. If generation is
-stopped before the answer starts, the partial reasoning stays visible. The
-result list and the answer remain on screen together after generation
-completes, so another result can be opened without leaving the answer view.
+Left/Right move it, and typing a character, Backspace, or Delete returns to the
+search prompt and applies that key, so the query can be changed without leaving
+the view. Use the mouse wheel, PgUp/PgDn, or Home/End to scroll the answer;
+wheel scrolling never changes the selected result. `Esc` stops generation; once
+the answer is finished, `Esc` returns to the search list, where `q` quits. If
+generation is stopped before the answer starts, the partial reasoning stays
+visible. The result list and the answer remain on screen together after
+generation completes, so another result can be opened without leaving the
+answer view.
 
 ```text
 search> how do I read a parquet file?
@@ -190,7 +191,7 @@ search> how do I read a parquet file?
 The answer uses a 16,384-token context. When the ten matching blocks do not fit,
 blocks are dropped from the end and the last remaining block is shortened. The
 question and the model's generation prompt are always kept. Sampling uses a
-temperature of 0.9 and top-p 0.95.
+temperature of 0.9.
 
 ## Semantic search
 

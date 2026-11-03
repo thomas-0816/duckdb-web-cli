@@ -33,8 +33,6 @@ constexpr int ANSWER_UBATCH_TOKENS = 512;
 constexpr int ANSWER_THREADS = 8;
 
 constexpr float ANSWER_TEMPERATURE = 0.9f;
-constexpr float ANSWER_TOP_P = 0.95f;
-constexpr float ANSWER_REPEAT_PENALTY = 1.0f;
 
 constexpr const char *ANSWER_SYSTEM_PROMPT =
     "You answer questions about DuckDB. Use only the documentation excerpts supplied in the user message, "
@@ -450,9 +448,6 @@ void GenerateAnswer(const std::string &question, const std::vector<SearchResult>
 
 	auto sampler_params = llama_sampler_chain_default_params();
 	auto *sampler = llama_sampler_chain_init(sampler_params);
-	llama_sampler_chain_add(
-	    sampler, llama_sampler_init_penalties(llama_vocab_n_tokens(vocab), 64, ANSWER_REPEAT_PENALTY, 0.0f, 0.0f));
-	llama_sampler_chain_add(sampler, llama_sampler_init_top_p(ANSWER_TOP_P, 1));
 	llama_sampler_chain_add(sampler, llama_sampler_init_temp(ANSWER_TEMPERATURE));
 	llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
 

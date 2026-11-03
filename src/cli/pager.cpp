@@ -1282,7 +1282,7 @@ enum class AnswerAction {
 AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
                                    const std::vector<SearchResult> &results,
                                    const std::vector<SearchResult> &search_results, std::size_t &selected,
-                                   std::size_t query_cursor, bool color, int &pending_key);
+                                   std::size_t &query_cursor, bool color, int &pending_key);
 
 //! Show the model-loading progress below the still-visible result list.
 void DrawSplitAnswerLoading(const char *label, const std::string &query, std::size_t query_cursor,
@@ -2024,7 +2024,7 @@ void DrawSplitAnswerLoading(const char *label, const std::string &query, std::si
 AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
                                    const std::vector<SearchResult> &results,
                                    const std::vector<SearchResult> &search_results, std::size_t &selected,
-                                   std::size_t query_cursor, bool color, int &pending_key) {
+                                   std::size_t &query_cursor, bool color, int &pending_key) {
 	std::string reasoning;
 	std::string answer;
 	std::string reasoning_pending;
@@ -2120,6 +2120,12 @@ AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
 		case KEY_END:
 			view.scroll = current.max_scroll;
 			view.follow_tail = true;
+			return true;
+		case KEY_LEFT:
+			query_cursor = PreviousCodepoint(query, query_cursor);
+			return true;
+		case KEY_RIGHT:
+			query_cursor = NextCodepoint(query, query_cursor);
 			return true;
 		case KEY_MOUSE: {
 			if (!g_mouse_event.press || (g_mouse_event.button & 3) != 0 ||
