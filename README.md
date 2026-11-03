@@ -230,7 +230,7 @@ query. If not all titles fit, the tab bar shows a window around the active title
 with `…` markers:
 
 ```text
-Search | 1 Text Types | 2 Types API | 3 Time Types | 4 Relational API | 5 CREATE MACRO Statement
+Search | Text Types | Types API | Time Types | Relational API | CREATE MACRO Statement
 ------------------------------------------------------------------------------
 ...
 Result 1/10  |  Lines 1-24/80  |  ESC Search  |  / Find-in-page  |  Up/Down scroll  |  Left/Right result  |  q quit

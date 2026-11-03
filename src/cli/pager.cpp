@@ -212,9 +212,9 @@ void StyleTab(Tab &tab, bool active, bool color) {
 	tab.width = cli::VisibleWidth(tab.plain);
 }
 
-Tab MakeTab(std::size_t position, const std::string &title, bool active, bool color) {
+Tab MakeTab(const std::string &title, bool active, bool color) {
 	Tab tab;
-	tab.plain = std::to_string(position + 1) + " " + PlainTitle(title);
+	tab.plain = PlainTitle(title);
 	StyleTab(tab, active, color);
 	return tab;
 }
@@ -245,7 +245,7 @@ TabBarLayout MakeTabBar(const std::vector<SearchResult> &results, std::size_t in
 	StyleTab(search_tab, false, color);
 	tabs.push_back(std::move(search_tab));
 	for (std::size_t i = 0; i < results.size(); i++) {
-		tabs.push_back(MakeTab(i, results[i].title, i == index, color));
+		tabs.push_back(MakeTab(results[i].title, i == index, color));
 	}
 	if (tabs.empty()) {
 		return {};
