@@ -1267,6 +1267,21 @@ FindEdit EditFind(const std::string &initial_query, bool color) {
 //! asked to quit the application.
 bool ShowAnswer(const char *label, const std::string &query, const std::vector<SearchResult> &results, bool color);
 
+enum class AnswerAction {
+	None,
+	Done,
+	Quit,
+	OpenResult,
+};
+
+//! Stream an answer below the still-active search result list. The selected
+//! list entry is updated in place; returning OpenResult asks the caller to open
+//! that result.
+AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
+                                   const std::vector<SearchResult> &results,
+                                   const std::vector<SearchResult> &search_results, std::size_t &selected,
+                                   bool color);
+
 QueryEdit EditQuery(const char *label, SearchFunction search, idx_t limit, const std::string &initial_query,
                     const std::vector<SearchResult> &initial_results, std::size_t initial_selected, bool color,
                     bool from_pager) {
@@ -1380,8 +1395,14 @@ QueryEdit EditQuery(const char *label, SearchFunction search, idx_t limit, const
 							continue;
 						}
 					}
-					if (ShowAnswer(label, edit.query, answer_blocks, color)) {
+					auto action = ShowAnswerWithResults(label, edit.query, answer_blocks, edit.results, edit.selected,
+					                                    color);
+					if (action == AnswerAction::Quit) {
 						break;
+					}
+					if (action == AnswerAction::OpenResult) {
+						edit.accepted = true;
+						return edit;
 					}
 					error.clear();
 					continue;
@@ -1771,23 +1792,13 @@ std::string BuildAnswerSources(const std::vector<SearchResult> &results) {
 
 namespace {
 
-PagerPage BuildAnswerSourcesPage(const std::vector<SearchResult> &results, const std::string &query, bool color,
-                                 int columns) {
-	PagerPage page;
-	SearchResult source;
-	source.content = "\n---\n\n" + BuildAnswerSources(results);
-	source.title = "Sources: " + query;
-	AppendPageContent(page, source, color, false, columns);
-	return page;
-}
-
 struct BuiltAnswerPage {
 	PagerPage page;
 	std::size_t answer_lines = 0;
 };
 
 BuiltAnswerPage BuildAnswerPage(const std::string &reasoning, const std::string &answer, const std::string &query,
-                                const PagerPage *sources_page, bool color, int columns) {
+                                bool color, int columns) {
 	auto width_limit = static_cast<std::size_t>(std::max(columns - 1, 1));
 	auto title = PlainTitle(query);
 	auto prefix = std::string("Answer | ");
@@ -1806,20 +1817,14 @@ BuiltAnswerPage BuildAnswerPage(const std::string &reasoning, const std::string 
 	AppendPageContent(page, result, color, false, columns);
 	BuiltAnswerPage built;
 	built.answer_lines = page.content.size();
-	if (sources_page) {
-		page.content.insert(page.content.end(), sources_page->content.begin(), sources_page->content.end());
-		page.content_links.insert(page.content_links.end(), sources_page->content_links.begin(),
-		                          sources_page->content_links.end());
-	}
 	built.page = std::move(page);
 	return built;
 }
 
-void DrawAnswerPage(const std::string &reasoning, const std::string &answer, const std::string &query,
-                    const PagerPage *sources_page, bool color,
+void DrawAnswerPage(const std::string &reasoning, const std::string &answer, const std::string &query, bool color,
                     const std::string &status = "Answering  |  Esc stop  |  q quit") {
 	auto size = GetTerminalSize();
-	auto built = BuildAnswerPage(reasoning, answer, query, sources_page, color, size.columns);
+	auto built = BuildAnswerPage(reasoning, answer, query, color, size.columns);
 	auto header_rows = built.page.header.size();
 	auto available = static_cast<std::size_t>(std::max(std::max(size.rows, 3) - static_cast<int>(header_rows) - 1, 1));
 	auto visible = std::min(built.page.content.size(), available);
@@ -1831,6 +1836,400 @@ void DrawAnswerPage(const std::string &reasoning, const std::string &answer, con
 	Draw(pages, 0, scroll, color, std::string(), true, status);
 }
 
+struct SplitAnswerLayout {
+	std::size_t list_rows = 1;
+	std::size_t first = 0;
+	std::size_t list_header_start = 2;
+	std::size_t header_rows = 4;
+};
+
+SplitAnswerLayout MakeSplitAnswerLayout(std::size_t entry_count, std::size_t selected, int terminal_rows,
+                                        bool show_correction) {
+	SplitAnswerLayout layout;
+	auto rows = std::max(terminal_rows, 8);
+	auto correction_rows = show_correction ? 1 : 0;
+	auto fixed = 4 + correction_rows;
+	auto remaining = static_cast<std::size_t>(std::max(rows - fixed, 2));
+	layout.list_rows = std::min(entry_count, std::max<std::size_t>(1, remaining / 2));
+	if (layout.list_rows >= remaining) {
+		layout.list_rows = remaining > 1 ? remaining - 1 : 1;
+	}
+	if (selected >= layout.list_rows) {
+		layout.first = selected - layout.list_rows + 1;
+	}
+	layout.list_header_start = 2 + static_cast<std::size_t>(correction_rows);
+	layout.header_rows = layout.list_header_start + layout.list_rows + 1;
+	return layout;
+}
+
+struct SplitAnswerPage {
+	PagerPage page;
+	SplitAnswerLayout layout;
+};
+
+SplitAnswerPage BuildSplitAnswerPage(const char *label, const std::string &query,
+                                     const std::vector<SearchResult> &results, std::size_t selected, bool color,
+                                     const std::string &reasoning, const std::string &answer, bool cancelled,
+                                     const std::string &error, bool final, int terminal_rows, int columns) {
+	auto show_correction = !results.empty() && !results.front().corrected_query.empty() && terminal_rows >= 6;
+	SplitAnswerPage built;
+	built.layout = MakeSplitAnswerLayout(results.size() + 2, selected, terminal_rows, show_correction);
+	auto &page = built.page;
+
+	auto width_limit = static_cast<std::size_t>(std::max(columns - 1, 1));
+	auto label_text = std::string(label) + "> ";
+	auto label_width = cli::VisibleWidth(label_text);
+	auto query_room = width_limit > label_width ? width_limit - label_width : 0;
+	auto visible_query = FitQueryToWidth(query, query.size(), query_room);
+	if (color) {
+		page.header.push_back(std::string(BOLD) + label + RESET + "> " + visible_query.text);
+	} else {
+		page.header.push_back(label_text + visible_query.text);
+	}
+	if (show_correction) {
+		auto correction = TruncatePlain("corrected to: " + results.front().corrected_query, width_limit);
+		page.header.push_back(color ? std::string(DIM) + correction + RESET : correction);
+	}
+	page.header.push_back(std::string());
+
+	auto answer_index = results.size();
+	auto quit_index = answer_index + 1;
+	for (std::size_t row = 0; row < built.layout.list_rows; row++) {
+		auto position = built.layout.first + row;
+		std::string line;
+		bool active = position == selected;
+		if (position < results.size()) {
+			line = std::to_string(position + 1) + ". " + PlainTitle(results[position].title);
+		} else if (position == answer_index) {
+			line = std::to_string(position + 1) + ". Answer with LLM";
+		} else if (position == quit_index) {
+			line = std::to_string(position + 1) + ". Quit";
+		}
+		line = TruncatePlain(line, width_limit);
+		if (active) {
+			if (color) {
+				line = std::string("\x1b[7m") + line + RESET;
+			} else {
+				line = "> " + line;
+			}
+		}
+		page.header.push_back(std::move(line));
+	}
+	auto rule = std::string(width_limit, '-');
+	page.header.push_back(color ? std::string(DIM) + rule + RESET : rule);
+
+	SearchResult body;
+	body.content = final ? ComposeAnswerContent(reasoning, answer, cancelled, error)
+	                     : ComposeLiveAnswer(reasoning, answer);
+	body.title = "Answer: " + query;
+	AppendPageContent(page, body, color, false, columns);
+	return built;
+}
+
+struct SplitAnswerView {
+	std::size_t scroll = 0;
+	bool follow_tail = true;
+};
+
+struct SplitDrawResult {
+	SplitAnswerLayout layout;
+	std::vector<std::vector<cli::TextLink>> content_links;
+	std::size_t header_rows = 0;
+	std::size_t available = 0;
+	std::size_t max_scroll = 0;
+};
+
+SplitDrawResult DrawSplitAnswerPage(const char *label, const std::string &query,
+                                    const std::vector<SearchResult> &results, std::size_t selected, bool color,
+                                    const std::string &reasoning, const std::string &answer, bool cancelled,
+                                    const std::string &error, bool final, SplitAnswerView &view,
+                                    const std::string &status) {
+	auto size = GetTerminalSize();
+	auto rows = std::max(size.rows, 8);
+	auto columns = std::max(size.columns, 20);
+	auto built = BuildSplitAnswerPage(label, query, results, selected, color, reasoning, answer, cancelled, error,
+	                                  final, rows, columns);
+	auto header_rows = built.page.header.size();
+	auto available = static_cast<std::size_t>(std::max(rows - static_cast<int>(header_rows) - 1, 1));
+	auto visible = std::min(built.page.content.size(), available);
+	auto max_scroll = built.page.content.size() > visible ? built.page.content.size() - visible : 0;
+
+	if (view.follow_tail) {
+		view.scroll = max_scroll;
+	}
+	view.scroll = std::min(view.scroll, max_scroll);
+
+	auto content_links = std::move(built.page.content_links);
+	std::vector<PagerPage> pages;
+	pages.push_back(std::move(built.page));
+	Draw(pages, 0, view.scroll, color, std::string(), true, status);
+
+	SplitDrawResult result;
+	result.layout = built.layout;
+	result.content_links = std::move(content_links);
+	result.header_rows = header_rows;
+	result.available = available;
+	result.max_scroll = max_scroll;
+	return result;
+}
+
+AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
+                                   const std::vector<SearchResult> &results,
+                                   const std::vector<SearchResult> &search_results, std::size_t &selected,
+                                   bool color) {
+	std::string reasoning;
+	std::string answer;
+	std::string reasoning_pending;
+	std::string answer_pending;
+	bool answer_started = false;
+	bool cancelled = false;
+	std::string error;
+	AnswerAction action = AnswerAction::None;
+	bool stop = false;
+
+	auto entry_count = search_results.size() + 2;
+	auto answer_index = search_results.size();
+	auto quit_index = answer_index + 1;
+	selected = std::min(selected, entry_count - 1);
+
+	SplitAnswerView view;
+	SplitDrawResult current;
+	bool final = false;
+	auto draw = [&](const std::string &status) {
+		current = DrawSplitAnswerPage(label, query, search_results, selected, color, reasoning, answer, cancelled,
+		                              error, final, view, status);
+	};
+
+	auto open_link = [&](const cli::TextLink &link) {
+		SearchResult target;
+		auto url = ExternalLinkTarget(link.url);
+		if (!IsExternalLink(link.url) && LookupPageByUrl(url, target)) {
+			if (RunInternalPage(label, target, color, false)) {
+				action = AnswerAction::Quit;
+				stop = true;
+			}
+		} else {
+			OpenUrl(url);
+		}
+	};
+
+	auto scroll_answer = [&](int direction, std::size_t amount) {
+		if (direction < 0) {
+			view.scroll = view.scroll > amount ? view.scroll - amount : 0;
+			view.follow_tail = false;
+		} else {
+			view.scroll = std::min(current.max_scroll, view.scroll + amount);
+			if (view.scroll >= current.max_scroll) {
+				view.follow_tail = true;
+			}
+		}
+	};
+
+	auto process_key = [&](int key, bool generating) -> bool {
+		switch (key) {
+		case 3:
+		case 'q':
+		case 'Q':
+			action = AnswerAction::Quit;
+			stop = true;
+			return false;
+		case 27:
+			if (generating) {
+				cancelled = true;
+			}
+			stop = true;
+			return false;
+		case '\r':
+		case '\n':
+			if (selected < search_results.size()) {
+				action = AnswerAction::OpenResult;
+				stop = true;
+			} else if (selected >= quit_index) {
+				action = AnswerAction::Quit;
+				stop = true;
+			}
+			return false;
+		case KEY_UP:
+		case 'k':
+			selected = selected == 0 ? entry_count - 1 : selected - 1;
+			return true;
+		case KEY_DOWN:
+		case 'j':
+			selected = (selected + 1) % entry_count;
+			return true;
+		case KEY_WHEEL_UP:
+			scroll_answer(-1, WHEEL_SCROLL_LINES);
+			return true;
+		case KEY_WHEEL_DOWN:
+			scroll_answer(1, WHEEL_SCROLL_LINES);
+			return true;
+		case KEY_PGUP:
+		case 'b':
+			scroll_answer(-1, current.available);
+			return true;
+		case KEY_PGDN:
+		case ' ':
+			scroll_answer(1, current.available);
+			return true;
+		case KEY_HOME:
+		case 'g':
+			view.scroll = 0;
+			view.follow_tail = false;
+			return true;
+		case KEY_END:
+		case 'G':
+			view.scroll = current.max_scroll;
+			view.follow_tail = true;
+			return true;
+		case KEY_MOUSE: {
+			if (!g_mouse_event.press || (g_mouse_event.button & 3) != 0 ||
+			    (g_mouse_event.button & (32 | 64)) != 0) {
+				return false;
+			}
+			auto row = g_mouse_event.row;
+			auto column = static_cast<std::size_t>(std::max(g_mouse_event.column, 0));
+			auto list_start = static_cast<int>(current.layout.list_header_start);
+			auto list_end = list_start + static_cast<int>(current.layout.list_rows);
+			if (row >= list_start && row < list_end) {
+				auto position = current.layout.first + static_cast<std::size_t>(row - list_start);
+				if (position < entry_count) {
+					selected = position;
+					if (position < search_results.size()) {
+						action = AnswerAction::OpenResult;
+						stop = true;
+					} else if (position >= quit_index) {
+						action = AnswerAction::Quit;
+						stop = true;
+					}
+					return true;
+				}
+				return false;
+			}
+			auto content_row = row - static_cast<int>(current.header_rows);
+			if (content_row < 0 || static_cast<std::size_t>(content_row) >= current.available) {
+				return false;
+			}
+			auto line = view.scroll + static_cast<std::size_t>(content_row);
+			if (line < current.content_links.size()) {
+				for (auto &link : current.content_links[line]) {
+					if (column >= link.start && column < link.end) {
+						open_link(link);
+						return true;
+					}
+				}
+			}
+			return false;
+		}
+		default:
+			return false;
+		}
+	};
+
+	auto handle_pending_input = [&](const std::string &status, bool generating) -> bool {
+		bool redraw = false;
+		while (!stop && WaitForInput(0)) {
+			if (process_key(ReadKey(), generating)) {
+				redraw = true;
+			}
+		}
+		if (redraw && !stop) {
+			draw(status);
+		}
+		return !stop;
+	};
+
+	draw("Reading the top 10 matching blocks  |  Please wait");
+	try {
+		GenerateAnswer(
+		    query, results,
+		    [&](const std::string &piece, bool is_reasoning) {
+			    if (!is_reasoning && !answer_started) {
+				    answer_started = true;
+				    reasoning.clear();
+				    reasoning_pending.clear();
+			    }
+			    auto &pending = is_reasoning ? reasoning_pending : answer_pending;
+			    auto &target = is_reasoning ? reasoning : answer;
+			    pending += piece;
+			    auto complete = cli::Utf8CompleteLength(pending);
+			    if (complete > 0) {
+				    target.append(pending, 0, complete);
+				    pending.erase(0, complete);
+			    }
+			    auto status = is_reasoning
+			                      ? "Thinking  |  Up/Down result  |  Enter open  |  PgUp/PgDn scroll  |  Esc stop"
+			                      : "Answering  |  Up/Down result  |  Enter open  |  PgUp/PgDn scroll  |  Esc stop";
+			    if (!handle_pending_input(status, true)) {
+				    return false;
+			    }
+			    if (complete > 0) {
+				    draw(status);
+			    }
+			    return true;
+		    },
+		    [&](std::size_t done, std::size_t total) {
+			    if (stop) {
+				    return;
+			    }
+			    auto percent = total == 0 ? 100 : static_cast<int>((done * 100 + total - 1) / total);
+			    constexpr std::size_t BAR_WIDTH = 20;
+			    std::string bar(BAR_WIDTH, ' ');
+			    std::fill_n(bar.begin(), static_cast<std::size_t>(percent) * BAR_WIDTH / 100, '#');
+			    auto status = "Processing prompt [" + bar + "] " + std::to_string(percent) + "%";
+			    if (!handle_pending_input(status, true)) {
+				    return;
+			    }
+			    draw(status);
+		    });
+	} catch (const std::exception &exception) {
+		error = exception.what();
+	}
+
+	if (!reasoning_pending.empty()) {
+		reasoning += reasoning_pending;
+	}
+	if (!answer_pending.empty()) {
+		answer += answer_pending;
+	}
+	if (error.empty() && !cancelled && answer.empty() && !reasoning.empty()) {
+		answer = std::move(reasoning);
+		reasoning.clear();
+	}
+
+	if (action == AnswerAction::Quit) {
+		return AnswerAction::Quit;
+	}
+	if (action == AnswerAction::OpenResult) {
+		return AnswerAction::OpenResult;
+	}
+
+	final = true;
+	if (view.follow_tail) {
+		view.follow_tail = false;
+		view.scroll = 0;
+	}
+	auto status = "Answer  |  Up/Down result  |  Enter open  |  PgUp/PgDn scroll  |  Esc back  |  q quit";
+	draw(status);
+	while (true) {
+		auto key = ReadKey();
+		bool redraw = process_key(key, false);
+		if (stop) {
+			break;
+		}
+		if (redraw) {
+			draw(status);
+		}
+	}
+
+	if (action == AnswerAction::Quit) {
+		return AnswerAction::Quit;
+	}
+	if (action == AnswerAction::OpenResult) {
+		return AnswerAction::OpenResult;
+	}
+	return AnswerAction::Done;
+}
+
 bool ShowAnswer(const char *label, const std::string &query, const std::vector<SearchResult> &results, bool color) {
 	std::string reasoning;
 	std::string answer;
@@ -1840,20 +2239,8 @@ bool ShowAnswer(const char *label, const std::string &query, const std::vector<S
 	bool cancelled = false;
 	bool quit = false;
 	std::string error;
-
-	auto sources = BuildAnswerSources(results);
-	auto sources_columns = GetTerminalSize().columns;
-	auto sources_page = BuildAnswerSourcesPage(results, query, color, sources_columns);
-	auto refresh_sources_page = [&]() {
-		auto columns = GetTerminalSize().columns;
-		if (columns != sources_columns) {
-			sources_columns = columns;
-			sources_page = BuildAnswerSourcesPage(results, query, color, columns);
-		}
-	};
 	auto draw = [&](const std::string &status) {
-		refresh_sources_page();
-		DrawAnswerPage(reasoning, answer, query, &sources_page, color, status);
+		DrawAnswerPage(reasoning, answer, query, color, status);
 	};
 
 	draw("Reading the top 10 matching blocks  |  Please wait");
@@ -1919,11 +2306,6 @@ bool ShowAnswer(const char *label, const std::string &query, const std::vector<S
 	}
 
 	auto content = ComposeAnswerContent(reasoning, answer, cancelled, error);
-	if (!content.empty() && content.back() != '\n') {
-		content += '\n';
-	}
-	content += "\n---\n\n";
-	content += sources;
 
 	SearchResult result;
 	result.content = content;

@@ -144,13 +144,12 @@ Pass `--llm` to answer a query directly instead of listing results:
 docs --llm "how do I read a parquet file?"
 ```
 
-On a terminal, `--llm` opens the same live answer view as the `Answer with LLM`
-entry: the reasoning is shown while the model thinks and hidden once the answer
-starts, and the finished answer can be scrolled. When the output is not a
-terminal, reasoning is streamed under a `Reasoning` heading followed by the
-answer under an `Answer` heading, then the source pages; load and prompt
-progress go to standard error. The flag requires a query; `docs --llm` on its
-own prints an error.
+On a terminal, `--llm` opens a live answer view: the reasoning is shown while
+the model thinks and hidden once the answer starts, and the finished answer can
+be scrolled. When the output is not a terminal, reasoning is streamed under a
+`Reasoning` heading followed by the answer under an `Answer` heading, then the
+source pages; load and prompt progress go to standard error. The flag requires
+a query; `docs --llm` on its own prints an error.
 
 Select `Answer with LLM` in the result list and press Enter. The first use loads
 the MiniCPM5 answer model and shows a progress bar while the weights are read.
@@ -165,18 +164,19 @@ to `MiniCPM5-1B-Q4_K_M.gguf`. The prompt is rendered with the chat template that
 ships in the model's GGUF metadata, using the Jinja engine in llama.cpp's common
 library, so the special tokens and the thinking block match the model exactly.
 A progress bar is shown while the prompt is being processed, before the first
-token. The source pages are already listed below the answer in the live page.
-The model's reasoning is streamed under
-`Reasoning` while it thinks and is hidden as soon as the answer starts. The
-final answer is streamed under `Answer`. `Esc` stops generation and opens the
-partial answer in a scrollable page; `q` quits. If generation is stopped before
-the answer starts, the partial reasoning stays visible. Once generation has
-finished, the answer page supports the same scrolling and find-in-page keys as
-the documentation pages. Press Left/Right to select a source link, Enter to open
-it, and Esc to clear the selection. Press Esc again to return to the search
-list. A list of links to the source pages is appended below the answer instead
-of the full prompt; pages that contributed more than one excerpt are linked
-once.
+token. While the answer streams, the search result list stays visible at the
+top of the screen and remains active: Up/Down selects a result, Enter opens it,
+and clicking it works as usual. The model's reasoning is streamed below the
+list under `Reasoning` and is hidden as soon as the answer starts. The final
+answer is streamed under `Answer`; there is no separate source list, because
+the search results above are the sources. Use the mouse wheel or PgUp/PgDn (or
+`b` and Space) to scroll the answer, and Home/End to jump to its start or end.
+Wheel scrolling never changes the selected result. `Esc` stops generation; once
+the answer is finished, `Esc` returns to the search list. `q` quits. If
+generation is stopped before the answer starts, the partial reasoning stays
+visible. The result list and the answer remain on screen together after
+generation completes, so another result can be opened without leaving the
+answer view.
 
 ```text
 search> how do I read a parquet file?

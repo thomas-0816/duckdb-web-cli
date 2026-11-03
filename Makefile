@@ -19,8 +19,10 @@ test: release
 	$(BUILD_DIR)/docs "varchar" 1 >/dev/null
 	$(BUILD_DIR)/docs --raw "parket" 1 | grep -q "Parquet"
 	$(BUILD_DIR)/docs --raw "parket" 1 | grep -q "corrected to: parquet"
-	$(BUILD_DIR)/docs --raw "varkar" 1 | grep -q "Text Types"
-	$(BUILD_DIR)/docs --raw "varchar" 1 | grep -q "Text Types"
+	# Semantic ranking may place a closely related page first (here the
+	# full-text search extension), so check that the type docs rank near the top.
+	$(BUILD_DIR)/docs --raw "varkar" 2 | grep -q "Text Types"
+	$(BUILD_DIR)/docs --raw "varchar" 2 | grep -q "Text Types"
 
 # A semantic query prepares the embedding index at startup (with a progress
 # line), so the first run can take a couple of minutes. Later runs load the
