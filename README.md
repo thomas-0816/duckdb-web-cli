@@ -1,4 +1,4 @@
-# Cli docs search for DuckDB
+# Cli for viewing and searching docs for DuckDB
 
 A standalone program for searching DuckDB's manual and blog:
 
