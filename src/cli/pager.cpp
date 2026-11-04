@@ -420,7 +420,11 @@ void AppendPageContent(PagerPage &page, const SearchResult &result, bool color, 
 		source += "\n\n[Open the original post](" + result.url + EXTERNAL_LINK_SUFFIX + ")";
 	}
 	std::vector<cli::MarkdownHeading> headings;
-	auto content = raw ? source : cli::RenderMarkdown(source, color, &headings);
+	// Color links by what opening them will actually do. A duckdb.org URL that
+	// is missing from the bundled corpus falls back to the browser, so it must
+	// not look like an internal page. The #external marker always wins.
+	auto is_external = [](const std::string &url) { return IsExternalLink(url) || !IsInternalPageUrl(url); };
+	auto content = raw ? source : cli::RenderMarkdown(source, color, &headings, is_external);
 
 	if (!raw && !headings.empty()) {
 		std::size_t max_text_width = 0;

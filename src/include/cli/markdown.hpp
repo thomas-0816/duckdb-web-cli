@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -17,14 +18,20 @@ struct MarkdownHeading {
 	std::string text;
 };
 
+//! Returns true when a link target should be shown and opened as external.
+using ExternalLinkPredicate = std::function<bool(const std::string &)>;
+
 //! Render a Markdown document for a terminal.
 //!
 //! Formatting is always applied (headings, lists, tables, code blocks, links).
 //! When `color` is true, ANSI colors, text styles, and OSC 8 hyperlinks are
 //! emitted as well. When `headings` is not null, the headings found in the
-//! document and their rendered line numbers are appended to it.
+//! document and their rendered line numbers are appended to it. When
+//! `is_external` is set, it decides the color of each link; otherwise links to
+//! duckdb.org are treated as internal and all other links as external.
 std::string RenderMarkdown(const std::string &markdown, bool color,
-                           std::vector<MarkdownHeading> *headings = nullptr);
+                           std::vector<MarkdownHeading> *headings = nullptr,
+                           ExternalLinkPredicate is_external = ExternalLinkPredicate());
 
 //! Width of a string in terminal cells, ignoring ANSI escape sequences.
 std::size_t VisibleWidth(const std::string &text);

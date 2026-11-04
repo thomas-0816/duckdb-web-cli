@@ -586,16 +586,53 @@ std::string NormalizeDocsPath(const std::string &path) {
 	return "/docs/2.0/" + rest;
 }
 
-bool LookupPathInCorpus(const Corpus &corpus, const std::string &path, bool blog, SearchResult &result) {
+const Page *FindPageByPath(const Corpus &corpus, const std::string &path, bool allow_normalized) {
 	auto page_entry = corpus.path_pages.find(path);
-	if (page_entry == corpus.path_pages.end()) {
+	if (page_entry != corpus.path_pages.end()) {
+		return &corpus.pages[page_entry->second];
+	}
+	if (!allow_normalized) {
+		return nullptr;
+	}
+	auto normalized = NormalizeDocsPath(path);
+	if (normalized == path) {
+		return nullptr;
+	}
+	auto normalized_entry = corpus.path_pages.find(normalized);
+	return normalized_entry == corpus.path_pages.end() ? nullptr : &corpus.pages[normalized_entry->second];
+}
+
+//! Resolve a URL to the corpus page that opening it would show. Returns false
+//! for external hosts and for duckdb.org pages that are not part of the export.
+bool FindPageByUrl(const std::string &url, const Corpus *&corpus, const Page *&page, bool &blog) {
+	std::string path;
+	if (!DuckDbPathFromUrl(url, path)) {
 		return false;
 	}
-	auto &page = corpus.pages[page_entry->second];
-	result.content = BuildPageContent(corpus, page);
-	result.score = 0;
-	result.title = blog ? "Blog: " + page.title : page.title;
-	result.url = "https://duckdb.org" + page.anchor;
+	blog = false;
+	if (path.compare(0, 6, "/docs/") == 0 || path == "/docs") {
+		auto &manual = GetManualCorpus();
+		page = FindPageByPath(manual, path, true);
+		if (!page) {
+			return false;
+		}
+		corpus = &manual;
+		return true;
+	}
+
+	auto &blog_corpus = GetBlogCorpus();
+	page = FindPageByPath(blog_corpus, path, false);
+	if (page) {
+		corpus = &blog_corpus;
+		blog = true;
+		return true;
+	}
+	auto &manual = GetManualCorpus();
+	page = FindPageByPath(manual, path, true);
+	if (!page) {
+		return false;
+	}
+	corpus = &manual;
 	return true;
 }
 
@@ -1195,37 +1232,24 @@ std::vector<SearchResult> SearchCorpora(const Corpus *manual, const Corpus *blog
 } // namespace
 
 bool LookupPageByUrl(const std::string &url, SearchResult &result) {
-	std::string path;
-	if (!DuckDbPathFromUrl(url, path)) {
+	const Corpus *corpus = nullptr;
+	const Page *page = nullptr;
+	bool blog = false;
+	if (!FindPageByUrl(url, corpus, page, blog)) {
 		return false;
 	}
-	// The website's installation landing page is not part of the Markdown
-	// export. Open the bundled installation page instead of a browser tab.
-	if (path == "/install") {
-		path = "/docs/2.0/operations_manual/installing_duckdb";
-	}
-	if (path.compare(0, 6, "/docs/") == 0 || path == "/docs") {
-		auto &manual = GetManualCorpus();
-		if (LookupPathInCorpus(manual, path, false, result)) {
-			return true;
-		}
-		auto normalized = NormalizeDocsPath(path);
-		if (normalized != path && LookupPathInCorpus(manual, normalized, false, result)) {
-			return true;
-		}
-		return false;
-	}
+	result.content = BuildPageContent(*corpus, *page);
+	result.score = 0;
+	result.title = blog ? "Blog: " + page->title : page->title;
+	result.url = "https://duckdb.org" + page->anchor;
+	return true;
+}
 
-	auto &blog = GetBlogCorpus();
-	if (LookupPathInCorpus(blog, path, true, result)) {
-		return true;
-	}
-	auto &manual = GetManualCorpus();
-	if (LookupPathInCorpus(manual, path, false, result)) {
-		return true;
-	}
-	auto normalized = NormalizeDocsPath(path);
-	return normalized != path && LookupPathInCorpus(manual, normalized, false, result);
+bool IsInternalPageUrl(const std::string &url) {
+	const Corpus *corpus = nullptr;
+	const Page *page = nullptr;
+	bool blog = false;
+	return FindPageByUrl(url, corpus, page, blog);
 }
 
 std::vector<SearchResult> SearchManual(const std::string &query, idx_t limit) {

@@ -41,4 +41,9 @@ void PrepareSemanticSearch(const std::string &query, bool force = false);
 //! documentation versions resolve to the bundled version when possible.
 bool LookupPageByUrl(const std::string &url, SearchResult &result);
 
+//! Whether a duckdb.org URL can be opened as a bundled page. Used to color
+//! links consistently with what opening them will do: links that are not in the
+//! corpus open in the browser and are shown as external.
+bool IsInternalPageUrl(const std::string &url);
+
 } // namespace docs

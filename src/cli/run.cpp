@@ -490,7 +490,8 @@ int RunCli(const char *program, const SearchMode &mode, int argc, char **argv) {
 				std::cout << '\n';
 			}
 		} else {
-			auto rendered = cli::RenderMarkdown(result.content, color);
+			auto is_external = [](const std::string &url) { return !IsInternalPageUrl(url); };
+			auto rendered = cli::RenderMarkdown(result.content, color, nullptr, is_external);
 			if (rendered.empty()) {
 				std::cout << '\n';
 			} else {

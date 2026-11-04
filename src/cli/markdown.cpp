@@ -468,8 +468,9 @@ bool IsSqlNameContext(const std::string &word) {
 
 class Renderer {
 public:
-	explicit Renderer(bool color, std::vector<MarkdownHeading> *headings = nullptr)
-	    : color_(color), headings_(headings) {
+	explicit Renderer(bool color, std::vector<MarkdownHeading> *headings = nullptr,
+	                  ExternalLinkPredicate is_external = ExternalLinkPredicate())
+	    : color_(color), headings_(headings), is_external_(std::move(is_external)) {
 		styles_.push_back(Style {});
 	}
 
@@ -1394,7 +1395,8 @@ private:
 		sink_ = &link_buf_;
 		link_href_ = info ? std::string(info->href.text, info->href.size) : std::string();
 		styles_.push_back(styles_.back());
-		styles_.back().fg = IsExternalLink(link_href_) ? EXTERNAL_LINK_COLOR : INTERNAL_LINK_COLOR;
+		bool external = is_external_ ? is_external_(link_href_) : IsExternalLink(link_href_);
+		styles_.back().fg = external ? EXTERNAL_LINK_COLOR : INTERNAL_LINK_COLOR;
 		styles_.back().underline = true;
 		EmitStyle();
 	}
@@ -1587,6 +1589,7 @@ private:
 
 	bool color_;
 	std::vector<MarkdownHeading> *headings_ = nullptr;
+	ExternalLinkPredicate is_external_;
 	std::string body_;
 	std::string *sink_ = &body_;
 
@@ -1792,8 +1795,9 @@ std::vector<std::string> WrapAnsi(const std::string &text, std::size_t width) {
 	return result;
 }
 
-std::string RenderMarkdown(const std::string &markdown, bool color, std::vector<MarkdownHeading> *headings) {
-	Renderer renderer(color, headings);
+std::string RenderMarkdown(const std::string &markdown, bool color, std::vector<MarkdownHeading> *headings,
+                           ExternalLinkPredicate is_external) {
+	Renderer renderer(color, headings, std::move(is_external));
 	return renderer.Render(markdown);
 }
 
