@@ -468,7 +468,8 @@ bool IsSqlNameContext(const std::string &word) {
 
 class Renderer {
 public:
-	explicit Renderer(bool color) : color_(color) {
+	explicit Renderer(bool color, std::vector<MarkdownHeading> *headings = nullptr)
+	    : color_(color), headings_(headings) {
 		styles_.push_back(Style {});
 	}
 
@@ -1358,6 +1359,10 @@ private:
 		sink_ = heading_prev_sink_;
 		in_heading_ = false;
 		StripHeadingAnchor(heading_buf_);
+		if (headings_) {
+			auto line = static_cast<std::size_t>(std::count(body_.begin(), body_.end(), '\n'));
+			headings_->push_back(MarkdownHeading {line, heading_level_, heading_buf_});
+		}
 		if (color_) {
 			switch (heading_level_) {
 			case 1:
@@ -1581,6 +1586,7 @@ private:
 	}
 
 	bool color_;
+	std::vector<MarkdownHeading> *headings_ = nullptr;
 	std::string body_;
 	std::string *sink_ = &body_;
 
@@ -1786,8 +1792,8 @@ std::vector<std::string> WrapAnsi(const std::string &text, std::size_t width) {
 	return result;
 }
 
-std::string RenderMarkdown(const std::string &markdown, bool color) {
-	Renderer renderer(color);
+std::string RenderMarkdown(const std::string &markdown, bool color, std::vector<MarkdownHeading> *headings) {
+	Renderer renderer(color, headings);
 	return renderer.Render(markdown);
 }
 

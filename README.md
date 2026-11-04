@@ -285,6 +285,12 @@ Search | Text Types | Types API | Time Types | Relational API | CREATE MACRO Sta
 Result 1/10  |  Lines 1-24/80  |  ESC Search  |  / Find-in-page  |  Up/Down scroll  |  Left/Right result  |  q quit
 ```
 
+When the terminal is wide enough, rendered pages also show an outline of their
+section headings on the right. The outline follows the page as you scroll and
+highlights the section at the top of the viewport. Click an outline entry to
+jump to that section; the outline itself scrolls when a page has more headings
+than fit on screen.
+
 Keys:
 
 ```text

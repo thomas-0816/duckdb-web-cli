@@ -326,8 +326,108 @@ struct PagerPage {
 	std::vector<std::string> content;
 	std::vector<std::vector<cli::TextLink>> content_links;
 	std::vector<TabHit> tab_hits;
+	//! Section headings shown in the outline on the right side.
+	struct TocEntry {
+		std::string text;
+		std::size_t line = 0;
+	};
+	std::vector<TocEntry> toc;
+	//! Number of columns used by the rendered page content.
+	std::size_t content_width = 0;
+	//! Width of the outline itself, excluding the gap before it. Zero when the
+	//! outline is hidden.
+	std::size_t toc_width = 0;
+	//! First column of the outline (zero based).
+	std::size_t toc_column = 0;
 	double score = 0;
 };
+
+constexpr std::size_t TOC_GAP = 2;
+//! Keep the outline clear of the terminal's right edge.
+constexpr std::size_t TOC_RIGHT_MARGIN = 1;
+constexpr std::size_t TOC_TOP_MARGIN = 1;
+constexpr std::size_t TOC_MIN_WIDTH = 12;
+constexpr std::size_t TOC_MAX_WIDTH = 40;
+constexpr std::size_t TOC_MIN_CONTENT_WIDTH = 40;
+constexpr int TOC_MIN_TERMINAL_COLUMNS = 70;
+
+//! Remove ANSI escape sequences and carriage returns from heading text.
+std::string PlainHeadingText(const std::string &text) {
+	std::string result;
+	std::size_t position = 0;
+	while (position < text.size()) {
+		auto byte = static_cast<unsigned char>(text[position]);
+		if (byte == 0x1b) {
+			position++;
+			if (position < text.size() && text[position] == '[') {
+				position++;
+				while (position < text.size()) {
+					auto end = static_cast<unsigned char>(text[position++]);
+					if (end >= 0x40 && end <= 0x7e) {
+						break;
+					}
+				}
+			} else if (position < text.size() && text[position] == ']') {
+				position++;
+				while (position < text.size()) {
+					if (text[position] == '\x07') {
+						position++;
+						break;
+					}
+					if (text[position] == '\x1b' && position + 1 < text.size() && text[position + 1] == '\\') {
+						position += 2;
+						break;
+					}
+					position++;
+				}
+			} else if (position < text.size()) {
+				position++;
+			}
+			continue;
+		}
+		if (byte != '\r') {
+			result.push_back(text[position]);
+		}
+		position++;
+	}
+	return result;
+}
+
+//! Index of the outline entry for the section at the top of the viewport.
+std::size_t TocActiveIndex(const PagerPage &page, std::size_t scroll) {
+	if (page.toc.empty()) {
+		return 0;
+	}
+	std::size_t active = 0;
+	for (std::size_t i = 0; i < page.toc.size(); i++) {
+		if (page.toc[i].line > scroll + 1) {
+			break;
+		}
+		active = i;
+	}
+	return active;
+}
+
+//! First outline entry that fits into `rows`, keeping the active entry visible.
+std::size_t TocFirstVisible(const PagerPage &page, std::size_t active, std::size_t rows) {
+	if (page.toc.size() <= rows) {
+		return 0;
+	}
+	auto first = active > rows / 2 ? active - rows / 2 : 0;
+	return std::min(first, page.toc.size() - rows);
+}
+
+std::string MakeTocLine(const PagerPage::TocEntry &entry, bool active, bool color) {
+	auto line = entry.text;
+	if (color) {
+		if (active) {
+			line = std::string("\x1b[1;7m") + line + RESET;
+		} else {
+			line = std::string(DIM) + line + RESET;
+		}
+	}
+	return line;
+}
 
 struct PageLinkRef {
 	std::size_t line = 0;
@@ -399,20 +499,59 @@ void AppendPageContent(PagerPage &page, const SearchResult &result, bool color, 
 	if (IsRedirectStub(result)) {
 		source += "\n\n[Open the original post](" + result.url + EXTERNAL_LINK_SUFFIX + ")";
 	}
-	auto content = raw ? source : cli::RenderMarkdown(source, color);
+	std::vector<cli::MarkdownHeading> headings;
+	auto content = raw ? source : cli::RenderMarkdown(source, color, &headings);
+
+	if (!raw && !headings.empty()) {
+		std::size_t max_text_width = 0;
+		for (std::size_t i = 1; i < headings.size(); i++) {
+			auto text = PlainHeadingText(headings[i].text);
+			max_text_width = std::max(max_text_width, cli::VisibleWidth(text));
+		}
+		if (max_text_width > 0 && columns >= TOC_MIN_TERMINAL_COLUMNS) {
+			auto toc_width = std::min(TOC_MAX_WIDTH, max_text_width);
+			auto available = columns > static_cast<int>(TOC_GAP + TOC_RIGHT_MARGIN + TOC_MIN_CONTENT_WIDTH)
+			                     ? static_cast<std::size_t>(columns) - TOC_GAP - TOC_RIGHT_MARGIN - TOC_MIN_CONTENT_WIDTH
+			                     : 0;
+			toc_width = std::min(toc_width, available);
+			if (toc_width >= TOC_MIN_WIDTH) {
+				page.toc_width = toc_width;
+				page.toc_column = static_cast<std::size_t>(columns) - TOC_RIGHT_MARGIN - toc_width;
+				page.content_width = page.toc_column - TOC_GAP;
+			}
+		}
+	}
+	if (page.content_width == 0) {
+		page.content_width = static_cast<std::size_t>(std::max(columns, 1));
+	}
+
 	std::size_t start = 0;
-	auto wrap_width = static_cast<std::size_t>(std::max(columns, 1));
+	auto wrap_width = page.content_width;
+	std::vector<std::size_t> heading_lines(headings.size(), 0);
+	std::size_t next_heading = 0;
+	std::size_t source_line = 0;
 	while (start < content.size()) {
 		auto end = content.find('\n', start);
 		if (end == std::string::npos) {
 			end = content.size();
+		}
+		while (next_heading < headings.size() && headings[next_heading].line == source_line) {
+			heading_lines[next_heading] = page.content.size();
+			next_heading++;
 		}
 		auto chunks = cli::WrapAnsi(content.substr(start, end - start), wrap_width);
 		for (auto &chunk : chunks) {
 			page.content_links.push_back(cli::ExtractLinks(chunk));
 			page.content.push_back(std::move(chunk));
 		}
+		source_line++;
 		start = end + 1;
+	}
+	for (std::size_t i = 1; i < headings.size(); i++) {
+		auto text = PlainHeadingText(headings[i].text);
+		if (!text.empty()) {
+			page.toc.push_back({std::move(text), heading_lines[i]});
+		}
 	}
 	// Leave one blank line after the page so the last line is never flush
 	// against the status bar.
@@ -911,6 +1050,10 @@ void Draw(const std::vector<PagerPage> &pages, std::size_t index, std::size_t &s
 
 	// Fill the whole screen. When the page is shorter than the terminal the
 	// remaining rows stay blank and the status line sits on the last row.
+	bool show_toc = page.toc_width > 0 && !page.toc.empty();
+	std::size_t toc_rows = show_toc && available > TOC_TOP_MARGIN ? available - TOC_TOP_MARGIN : 0;
+	std::size_t toc_active = show_toc ? TocActiveIndex(page, scroll) : 0;
+	std::size_t toc_first = toc_rows > 0 ? TocFirstVisible(page, toc_active, toc_rows) : 0;
 	for (std::size_t row = 0; row < available; row++) {
 		if (scroll + row < page.content.size()) {
 			auto &line = page.content[scroll + row];
@@ -929,6 +1072,19 @@ void Draw(const std::vector<PagerPage> &pages, std::size_t index, std::size_t &s
 				output += HighlightPlainMatches(line, plain, matches);
 			} else {
 				output += line;
+			}
+		}
+		if (show_toc && row >= TOC_TOP_MARGIN && toc_rows > 0) {
+			auto has_line = scroll + row < page.content.size();
+			auto used = has_line ? cli::VisibleWidth(page.content[scroll + row]) : 0;
+			if (used < page.content_width) {
+				output.append(page.content_width - used, ' ');
+			}
+			output.append(TOC_GAP, ' ');
+			auto toc_index = toc_first + row - TOC_TOP_MARGIN;
+			if (toc_index < page.toc.size()) {
+				auto toc_line = MakeTocLine(page.toc[toc_index], toc_index == toc_active, color);
+				output += TruncatePlain(toc_line, page.toc_width);
 			}
 		}
 		output += "\x1b[K\n";
@@ -1685,6 +1841,21 @@ bool RunInternalPage(const char *label, const SearchResult &result, bool color, 
 			auto content_row = row - header_rows;
 			if (content_row < 0 || static_cast<std::size_t>(content_row) >= available) {
 				redraw = false;
+				break;
+			}
+			auto toc_rows = available > TOC_TOP_MARGIN ? available - TOC_TOP_MARGIN : 0;
+			if (toc_rows > 0 && page.toc_width > 0 && !page.toc.empty() && column >= page.toc_column &&
+			    static_cast<std::size_t>(column) < page.toc_column + page.toc_width &&
+			    static_cast<std::size_t>(content_row) >= TOC_TOP_MARGIN) {
+				auto active = TocActiveIndex(page, scroll);
+				auto first = TocFirstVisible(page, active, toc_rows);
+				auto toc_index =
+				    first + static_cast<std::size_t>(content_row) - TOC_TOP_MARGIN;
+				if (toc_index < page.toc.size()) {
+					scroll = std::min(page.toc[toc_index].line, max_scroll);
+				} else {
+					redraw = false;
+				}
 				break;
 			}
 			auto line = scroll + static_cast<std::size_t>(content_row);
@@ -2642,6 +2813,22 @@ int RunPager(const char *label, SearchFunction search, idx_t limit, const std::s
 					auto content_row = row - header_rows;
 					if (content_row < 0 || static_cast<std::size_t>(content_row) >= available) {
 						redraw = false;
+						break;
+					}
+					auto toc_rows = available > TOC_TOP_MARGIN ? available - TOC_TOP_MARGIN : 0;
+					if (toc_rows > 0 && page.toc_width > 0 && !page.toc.empty() &&
+					    column >= page.toc_column &&
+					    static_cast<std::size_t>(column) < page.toc_column + page.toc_width &&
+					    static_cast<std::size_t>(content_row) >= TOC_TOP_MARGIN) {
+						auto active = TocActiveIndex(page, positions[index]);
+						auto first = TocFirstVisible(page, active, toc_rows);
+						auto toc_index =
+						    first + static_cast<std::size_t>(content_row) - TOC_TOP_MARGIN;
+						if (toc_index < page.toc.size()) {
+							positions[index] = std::min(page.toc[toc_index].line, max_scroll);
+						} else {
+							redraw = false;
+						}
 						break;
 					}
 					auto line = positions[index] + static_cast<std::size_t>(content_row);

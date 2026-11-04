@@ -1,17 +1,30 @@
 #pragma once
 
+#include <cstddef>
 #include <string>
 #include <vector>
 
 namespace docs {
 namespace cli {
 
+//! A heading in a rendered Markdown document.
+struct MarkdownHeading {
+	//! Zero-based line number of the heading in the rendered text.
+	std::size_t line = 0;
+	//! Markdown heading level (1 for `#`, 2 for `##`, ...).
+	unsigned int level = 0;
+	//! Rendered heading text, possibly containing ANSI escape sequences.
+	std::string text;
+};
+
 //! Render a Markdown document for a terminal.
 //!
 //! Formatting is always applied (headings, lists, tables, code blocks, links).
 //! When `color` is true, ANSI colors, text styles, and OSC 8 hyperlinks are
-//! emitted as well.
-std::string RenderMarkdown(const std::string &markdown, bool color);
+//! emitted as well. When `headings` is not null, the headings found in the
+//! document and their rendered line numbers are appended to it.
+std::string RenderMarkdown(const std::string &markdown, bool color,
+                           std::vector<MarkdownHeading> *headings = nullptr);
 
 //! Width of a string in terminal cells, ignoring ANSI escape sequences.
 std::size_t VisibleWidth(const std::string &text);
