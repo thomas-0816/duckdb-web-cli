@@ -199,10 +199,11 @@ void BuildPages(Corpus &corpus) {
 		    i + 1 < corpus.pages.size() ? corpus.pages[i + 1].start_line : static_cast<uint32_t>(corpus.lines.size());
 	}
 
-	// Some pages only group child sections and have no body of their own, such
-	// as "## Parquet Files" immediately followed by "### Reading and Writing
-	// Parquet Files". Give those pages the content of their first child page so
-	// opening them from a search result does not show an empty page.
+	// Some pages only group child pages and have no body of their own, such as
+	// "# Configuration" immediately followed by "## Configuration". These
+	// headings are not pages themselves (their URLs do not exist), and giving
+	// them the content of their first child page duplicates that page in search
+	// results. Drop them from the corpus instead.
 	auto page_level = [&](idx_t page_id) {
 		auto &page = corpus.pages[page_id];
 		if (page.sections.empty()) {
@@ -210,6 +211,8 @@ void BuildPages(Corpus &corpus) {
 		}
 		return corpus.sections[page.sections.front()].level;
 	};
+	std::vector<bool> group_pages(corpus.pages.size(), false);
+	bool has_group_pages = false;
 	for (idx_t page_id = 0; page_id < corpus.pages.size(); page_id++) {
 		auto &page = corpus.pages[page_id];
 		bool has_body = false;
@@ -226,8 +229,26 @@ void BuildPages(Corpus &corpus) {
 			if (page_level(child_id) <= level) {
 				break;
 			}
-			page.end_line = corpus.pages[child_id].end_line;
+			group_pages[page_id] = true;
+			has_group_pages = true;
 			break;
+		}
+	}
+
+	if (has_group_pages) {
+		std::vector<Page> pages;
+		pages.reserve(corpus.pages.size());
+		for (idx_t page_id = 0; page_id < corpus.pages.size(); page_id++) {
+			if (!group_pages[page_id]) {
+				pages.push_back(std::move(corpus.pages[page_id]));
+			}
+		}
+		corpus.pages = std::move(pages);
+		corpus.section_pages.assign(corpus.section_pages.size(), 0);
+		for (idx_t page_id = 0; page_id < corpus.pages.size(); page_id++) {
+			for (auto section_id : corpus.pages[page_id].sections) {
+				corpus.section_pages[section_id] = static_cast<uint32_t>(page_id);
+			}
 		}
 	}
 
@@ -1021,7 +1042,7 @@ SemanticCorpusCache &GetSemanticCorpusCache(const Corpus *manual, const Corpus *
 		if (blog) {
 			BuildSemanticDocuments(*blog, 1, cache.documents);
 		}
-		cache.fingerprint = "semantic-v4";
+		cache.fingerprint = "semantic-v5";
 		if (manual) {
 			cache.fingerprint += "|docs:" + Sha1HexDigest(manual->data);
 		}
