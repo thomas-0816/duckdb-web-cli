@@ -149,8 +149,8 @@ be scrolled. When the output is not a terminal, reasoning is streamed under a
 Load and prompt progress go to standard error. The flag requires a query.
 
 Select `Answer with LLM` in the result list and press Enter. The first use loads
-the local answer model and shows a progress bar while the weights are read.
-By default this is MiniCPM5. When the local model is missing, it is downloaded
+the local answer model. By default this is MiniCPM5.
+When the local model is missing, it is downloaded
 from HuggingFace through llama.cpp's downloader and stored in the standard
 HuggingFace cache (`~/.cache/huggingface/hub`). The model stays loaded for the
 rest of the session.
@@ -163,10 +163,7 @@ tag, for example:
 docs --llm --model=<user>/<model>-GGUF:Q4_K_M "how do I read a parquet file?"
 ```
 
-The selected model is downloaded and cached the same way. It must provide a
-chat template. In the live search, `--model` also controls the model used by
-`Answer with LLM`.
-
+In the live search, `--model` also controls the model used by `Answer with LLM`.
 The program searches the documentation and blog as usual, takes the ten
 best-matching content blocks (chunks of at most about 1,800 characters, each
 prefixed with its page title), and sends the question together with those blocks
@@ -416,8 +413,7 @@ build/release/semantic-bge-small-en-v1.5-q8_0.meta
 ```
 
 The build contains the embedding model, llama.cpp, and the compiled GPU shaders.
-The default answer model (~656 MB) is downloaded on demand into the local HuggingFace cache;
-`--model=<repo>` selects a different HuggingFace model.
+The answer model (default MiniCPM5, ~656 MB) is downloaded on demand into the local HuggingFace cache.
 The embedding model is linked into the executable; the answer model is loaded from disk when the
 answer mode is opened for the first time.
 
@@ -494,7 +490,7 @@ program:
    is replaced only when a candidate is within one edit (two for words of six or
    more characters), starts with the same letter, and occurs at least twice in
    the documentation.
-2. Embeds the corrected query with the same Q8_0 model and the BGE query prefix.
+2. Embeds the corrected query with the same embedding model and the BGE query prefix.
 3. Searches the HNSW index for the nearest chunks with cosine similarity.
 4. Groups the chunks back into complete pages. A page's score is the highest
    score of its chunks, so several matching chunks from the same page still
@@ -504,8 +500,4 @@ program:
 6. Returns the top complete pages, which are rendered from the local Markdown.
    Blog pages are titled with a `Blog: ` prefix so they are easy to spot in
    combined results.
-
-There is no prefix, fuzzy, or phonetic index. Spelling correction handles common
-typos such as `parket` and `varkar`; the remaining ranking is semantic.
-
-Internal anchors are rewritten to `duckdb.org` links in the returned Markdown.
+7. Spelling correction handles common typos such as `parket` and `varkar`.
