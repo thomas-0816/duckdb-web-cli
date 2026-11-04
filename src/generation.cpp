@@ -23,7 +23,7 @@
 namespace docs {
 namespace {
 
-constexpr const char *ANSWER_MODEL_HF_REPO = "openbmb/MiniCPM5-1B-GGUF:Q4_K_M";
+constexpr const char *DEFAULT_ANSWER_MODEL_HF_REPO = "openbmb/MiniCPM5-1B-GGUF:Q4_K_M";
 constexpr const char *ANSWER_MODEL_DOWNLOAD_SIZE = "656 MB";
 constexpr int ANSWER_CONTEXT_TOKENS = 16384;
 constexpr int ANSWER_MAX_OUTPUT_TOKENS = 2048;
@@ -52,6 +52,19 @@ AnswerEngine &GetAnswerEngine() {
 	return engine;
 }
 
+std::string &AnswerModelRepo() {
+	static std::string repo = DEFAULT_ANSWER_MODEL_HF_REPO;
+	return repo;
+}
+
+std::string AnswerModelDownloadStatus(const std::string &hf_repo) {
+	auto status = "Downloading " + hf_repo;
+	if (hf_repo == DEFAULT_ANSWER_MODEL_HF_REPO) {
+		status += std::string(" (about ") + ANSWER_MODEL_DOWNLOAD_SIZE + ")";
+	}
+	return status + "...";
+}
+
 void SilenceLlamaLog(enum ggml_log_level, const char *, void *) {
 }
 
@@ -67,7 +80,7 @@ void EnsureLlamaBackend() {
 std::string AnswerModelPath() {
 	// The model lives in the same Hugging Face cache that llama.cpp's
 	// downloader uses, so it is shared with the llama CLI and other tools.
-	return common_download_resolve_path(ANSWER_MODEL_HF_REPO);
+	return common_download_resolve_path(AnswerModelRepo());
 }
 
 bool ReportLoadProgress(float progress, void *user) {
@@ -123,7 +136,8 @@ std::string EnsureAnswerModelFile(const std::string &model_path, const AnswerLoa
 		return model_path;
 	}
 
-	auto status = std::string("Downloading ") + ANSWER_MODEL_HF_REPO + " (about " + ANSWER_MODEL_DOWNLOAD_SIZE + ")...";
+	auto &hf_repo = AnswerModelRepo();
+	auto status = AnswerModelDownloadStatus(hf_repo);
 	if (progress) {
 		progress(0.0f, status);
 	}
@@ -131,19 +145,19 @@ std::string EnsureAnswerModelFile(const std::string &model_path, const AnswerLoa
 	// Resolve and fetch through llama.cpp's Hugging Face cache, the same path
 	// `llama download -hf` uses, so the model is shared with other tools.
 	common_params params;
-	params.model.hf_repo = ANSWER_MODEL_HF_REPO;
+	params.model.hf_repo = hf_repo;
 
 	AnswerModelDownloadCallback callback(progress, status);
 	try {
 		auto handler = common_models_handler_init(params, LLAMA_EXAMPLE_DOWNLOAD);
 		common_models_handler_apply(handler, params, &callback);
 	} catch (const std::exception &failure) {
-		throw std::runtime_error("Could not download " + std::string(ANSWER_MODEL_HF_REPO) + ": " + failure.what());
+		throw std::runtime_error("Could not download " + hf_repo + ": " + failure.what());
 	}
 
 	error.clear();
 	if (params.model.path.empty() || !std::filesystem::exists(params.model.path, error) || error) {
-		throw std::runtime_error("Could not download " + std::string(ANSWER_MODEL_HF_REPO));
+		throw std::runtime_error("Could not download " + hf_repo);
 	}
 	if (progress) {
 		progress(0.0f, "Download complete; loading the model weights...");
@@ -376,6 +390,13 @@ void DecodePrompt(llama_context *context, const std::vector<llama_token> &tokens
 }
 
 } // namespace
+
+void SetAnswerModel(const std::string &hf_repo) {
+	if (hf_repo.empty()) {
+		throw std::invalid_argument("The answer model repository must not be empty");
+	}
+	AnswerModelRepo() = hf_repo;
+}
 
 bool AnswerModelAvailable() {
 	std::error_code error;

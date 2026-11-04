@@ -62,6 +62,7 @@ void PrintUsage(const char *program) {
 	std::cerr << "      --raw              Print the original Markdown without rendering\n";
 	std::cerr << "      --no-ui            Print results without interactive UI\n";
 	std::cerr << "      --llm              Answer with the local LLM instead of listing results\n";
+	std::cerr << "      --model=REPO       HuggingFace repo for LLM answer (default openbmb/MiniCPM5-1B-GGUF:Q4_K_M)\n";
 	std::cerr << "  -h, --help             Show this help\n";
 }
 
@@ -349,6 +350,28 @@ int RunCli(const char *program, const SearchMode &mode, int argc, char **argv) {
 		}
 		if (argument == "--llm") {
 			llm = true;
+			continue;
+		}
+		if (argument == "--model") {
+			if (i + 1 >= argc) {
+				std::cerr << program << ": missing value for " << argument << "\n";
+				return 2;
+			}
+			auto value = std::string(argv[++i]);
+			if (value.empty()) {
+				std::cerr << program << ": missing value for " << argument << "\n";
+				return 2;
+			}
+			SetAnswerModel(value);
+			continue;
+		}
+		if (argument.compare(0, 8, "--model=") == 0) {
+			auto value = argument.substr(8);
+			if (value.empty()) {
+				std::cerr << program << ": missing value for --model\n";
+				return 2;
+			}
+			SetAnswerModel(value);
 			continue;
 		}
 		positional.push_back(std::move(argument));

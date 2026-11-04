@@ -11,6 +11,12 @@ namespace docs {
 //! Number of documentation content blocks that are sent to the answer model.
 constexpr idx_t ANSWER_RESULT_COUNT = 10;
 
+//! Select the Hugging Face repository (optionally with a quantization tag)
+//! used by the answer model, for example
+//! "openbmb/MiniCPM5-1B-GGUF:Q4_K_M". Call this before PrepareAnswerModel.
+//! The default is openbmb/MiniCPM5-1B-GGUF:Q4_K_M.
+void SetAnswerModel(const std::string &hf_repo);
+
 //! True when the separate answer model file can be found.
 bool AnswerModelAvailable();
 

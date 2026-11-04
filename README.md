@@ -91,6 +91,7 @@ Options:
     --raw              Print the original Markdown without rendering
     --no-ui            Print results without interactive UI
     --llm              Answer with the local LLM instead of listing results
+    --model=REPO       HuggingFace repo for LLM answer (default openbmb/MiniCPM5-1B-GGUF:Q4_K_M)
 -h, --help             Show this help
 ```
 
@@ -148,15 +149,28 @@ be scrolled. When the output is not a terminal, reasoning is streamed under a
 Load and prompt progress go to standard error. The flag requires a query.
 
 Select `Answer with LLM` in the result list and press Enter. The first use loads
-the local MiniCPM5 answer model and shows a progress bar while the weights are read.
-When the local MiniCPM5 model is missing, it is downloaded from HuggingFace
-through llama.cpp's downloader and stored in the standard HuggingFace cache
-(`~/.cache/huggingface/hub`). The model stays loaded for the rest of the session.
+the local answer model and shows a progress bar while the weights are read.
+By default this is MiniCPM5. When the local model is missing, it is downloaded
+from HuggingFace through llama.cpp's downloader and stored in the standard
+HuggingFace cache (`~/.cache/huggingface/hub`). The model stays loaded for the
+rest of the session.
+
+Pass `--model=<repo>` to answer with another GGUF model from HuggingFace
+instead. The value is a model repository, optionally followed by a quantization
+tag, for example:
+
+```sh
+docs --llm --model=<user>/<model>-GGUF:Q4_K_M "how do I read a parquet file?"
+```
+
+The selected model is downloaded and cached the same way. It must provide a
+chat template. In the live search, `--model` also controls the model used by
+`Answer with LLM`.
 
 The program searches the documentation and blog as usual, takes the ten
 best-matching content blocks (chunks of at most about 1,800 characters, each
 prefixed with its page title), and sends the question together with those blocks
-to `MiniCPM5-1B-Q4_K_M.gguf`. `Esc` stops anwer generation.
+to the answer model. `Esc` stops answer generation.
 `Enter` stops generation and starts it again, so a new answer can
 be requested without leaving the view. The model's reasoning is streamed below
 the list under `Reasoning` and is hidden as soon as the answer starts. The final
@@ -402,7 +416,8 @@ build/release/semantic-bge-small-en-v1.5-q8_0.meta
 ```
 
 The build contains the embedding model, llama.cpp, and the compiled GPU shaders.
-The MiniCPM5 answer model (~656 MB) is downloaded on demand into the local HuggingFace cache.
+The default answer model (~656 MB) is downloaded on demand into the local HuggingFace cache;
+`--model=<repo>` selects a different HuggingFace model.
 The embedding model is linked into the executable; the answer model is loaded from disk when the
 answer mode is opened for the first time.
 
