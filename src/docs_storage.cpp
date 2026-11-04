@@ -539,10 +539,8 @@ const DataPaths &GetDataPaths() {
 	static const DataPaths paths = [] {
 		DataPaths result;
 		result.binary_dir = ExecutableDirectory();
-		result.docs_markdown = FirstWithContent({JoinPath(result.binary_dir, "duckdb-docs.md"),
-		                                         JoinPath(result.binary_dir, "data/duckdb-docs.md")});
-		result.blog_markdown = FirstWithContent({JoinPath(result.binary_dir, "duckdb-blog.md"),
-		                                         JoinPath(result.binary_dir, "data/duckdb-blog.md")});
+		result.docs_markdown = FirstWithContent({JoinPath(result.binary_dir, "duckdb-docs.md")});
+		result.blog_markdown = FirstWithContent({JoinPath(result.binary_dir, "duckdb-blog.md")});
 		result.cache_dir = CacheDirectory(result.binary_dir);
 		result.docs_data = JoinPath(result.cache_dir, "duckdb-docs-data");
 		result.docs_index = JoinPath(result.cache_dir, "duckdb-docs-index");

@@ -36,7 +36,9 @@ endif()
 
 set(DOCS_RUNTIME_FILES
   ${CMAKE_CURRENT_SOURCE_DIR}/duckdb-blog.md
-  ${CMAKE_CURRENT_SOURCE_DIR}/duckdb-docs.md)
+  ${CMAKE_CURRENT_SOURCE_DIR}/duckdb-docs.md
+  ${CMAKE_CURRENT_SOURCE_DIR}/semantic-bge-small-en-v1.5-q8_0.hnsw
+  ${CMAKE_CURRENT_SOURCE_DIR}/semantic-bge-small-en-v1.5-q8_0.meta)
 
 # The semantic index uses a Q8_0 GGUF embedding model, and the model is always
 # embedded in the binary. scripts/fetch_models.sh downloads it into the source

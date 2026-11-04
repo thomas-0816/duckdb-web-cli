@@ -1,6 +1,6 @@
 # Cli for viewing and searching docs for DuckDB
 
-A standalone program for searching DuckDB's manual and blog:
+A standalone program for using semantic search on DuckDB's manual and blog:
 
 ```sh
 docs "How to query a parquet file?"
@@ -13,8 +13,7 @@ semantic search: the Markdown is embedded with a small GGUF model through
 llama.cpp and searched through an HNSW vector index, so a question such as
 "how to read a parquet file?" finds the same pages as the keyword "parquet".
 There is no extension to load and no database connection. A search covers the
-documentation and the blog together; blog results are marked with a `Blog: `
-prefix.
+documentation and the blog together.
 
 The program looks for these files in its own directory:
 
@@ -24,7 +23,6 @@ duckdb-blog.md                      blog text
 duckdb-docs.md                      documentation text
 ```
 
-The documentation and blog Markdown files may also be placed under `data/`.
 If either file is missing, it is downloaded automatically from
 `https://blobs.duckdb.org/docs/` at startup; the URL is printed before the
 transfer starts. `docs --update` downloads both files again even when they
@@ -32,9 +30,8 @@ already exist. The answer model is downloaded when `Answer with LLM` is used for
 the first time and the file is missing.
 
 Generated files are written next to the binary, so the whole installation stays
-in one directory and nothing is left behind in `/tmp`. The cache is invalidated
-with SHA-1 checksums of the source files, so updating a Markdown file or the
-model rebuilds it automatically. The generated files can be deleted at any time.
+in one directory. The cache is invalidated with SHA-1 checksums of the source files,
+so updating a Markdown file rebuilds it automatically. Generated files can be deleted at any time.
 
 ## Using it from the DuckDB shell
 
@@ -52,9 +49,6 @@ Then, from inside `duckdb`:
 .system docs "How to query a csv file?"
 ```
 
-The program writes directly to the terminal, so real line breaks are preserved
-and `.mode` is irrelevant. No `LOAD` and no SQL macro are needed.
-
 ## Usage
 
 ```text
@@ -65,14 +59,11 @@ The default limit is 10 and the maximum is 1000. `--limit 3` and a trailing `3`
 are equivalent:
 
 ```sh
-docs "how to read a parquet file"
 docs "how to read a parquet file" 3
 docs --limit 3 "how to read a parquet file"
 ```
 
-Every search covers the documentation and the blog together. Blog results
-appear with a `Blog: ` prefix.
-
+Every search covers the documentation and the blog together.
 Results are complete pages, not snippets. All sections that belong to the same
 documentation page or blog post are grouped into a single result, and the whole
 page is rendered, including its subsections. The limit counts pages.
