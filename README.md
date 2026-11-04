@@ -272,7 +272,7 @@ window, while the batch and ubatch are both 2048 tokens.
 On an interactive terminal the pager takes over the whole terminal using the
 alternate screen buffer. The first line is a tab bar with the titles of the
 results and the active result highlighted. Pressing
-`q` restores the terminal contents that were visible before the search started.
+`Ctrl+c` restores the terminal contents that were visible before the search started.
 Pressing ESC returns to the search prompt with the current query. If not all titles fit,
 the tab bar shows a window around the active title with `…` markers:
 
@@ -280,7 +280,7 @@ the tab bar shows a window around the active title with `…` markers:
  Search | Text Types | Types API | Time Types | Relational API | CREATE MACRO Statement
 ------------------------------------------------------------------------------
 ...
- Result 1/10  |  Lines 1-24/80  |  ESC Search  |  / Find-in-page  |  Up/Down scroll  |  Left/Right prev,next  |  q Quit
+ Result 1/10  |  Lines 1-24/80  |  ESC Search  |  / Find-in-page  |  Up/Down scroll  |  Left/Right prev,next  |  Ctrl+c Quit
 ```
 
 When the terminal is wide enough, rendered pages also show an outline of their
@@ -302,7 +302,7 @@ n                       Next result; at the last result, open the search page
 Enter                   Go back from an internal page
 ESC                     Go back; ESC in the search prompt exits the program
 /                       Find text in the current page (Enter repeats)
-q                       Quit
+Ctrl+c                  Quit
 ```
 
 The pager captures the mouse so that clicks, dragging, and the wheel work. Drag
@@ -322,7 +322,7 @@ written for older documentation versions: the local page is shown instead of
 the published URL. The internal view has the same scrolling and find-in-page
 keys. Press Left/Right to select a link and Enter to open it; Esc clears the
 selection. Esc or a click on `[Back]` returns to the previous page when no link
-is selected, and `q` quits the application.
+is selected, and `Ctrl+c` quits the application.
 
 Blog pages that are only redirect stubs end with an `Open the original post`
 link. The full article lives on the site the DuckDB website redirects to, so the
