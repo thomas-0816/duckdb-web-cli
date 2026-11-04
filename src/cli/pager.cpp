@@ -602,7 +602,7 @@ int ReadByte() {
 int ReadKey() {
 	int key = ReadByte();
 	if (key < 0) {
-		return 'q';
+		return 3;
 	}
 	if (key != 27) {
 		return key;
@@ -844,12 +844,12 @@ std::string MakeStatus(std::size_t index, std::size_t total, std::size_t top, st
 	if (!internal) {
 		status += "  |  Left/Right prev,next";
 	} else if (answer) {
-		status += "  |  Left/Right link  |  Enter restart  |  Esc quit";
+		status += "  |  Left/Right link  |  Enter restart  |  Ctrl+c Quit";
 	} else {
 		status += "  |  Left/Right link  |  Enter/Esc back";
 	}
 	auto limit = static_cast<std::size_t>(std::max(columns - 1, 1));
-	status += "  |  q Quit";
+	status += "  |  Ctrl+c Quit";
 	if (status.size() > limit) {
 		status.resize(limit);
 	}
@@ -1045,13 +1045,13 @@ void DrawLiveSearch(const char *label, const std::string &query, std::size_t cur
 	if (!error.empty()) {
 		status = "Error: " + error;
 	} else if (query.empty()) {
-		status = "Type to search  |  Up/Down select  |  Esc quit";
+		status = "Type to search  |  Up/Down select  |  Ctrl+c Quit";
 	} else if (results.empty()) {
-		status = "No search results  |  Esc quit";
+		status = "No search results  |  Ctrl+c Quit";
 	} else {
 		auto enter = from_pager ? "Enter apply" : "Enter open";
 		status = std::to_string(results.size()) + (results.size() == 1 ? " result" : " results") +
-		         "  |  Up/Down select  |  " + enter + "  |  Esc quit";
+		         "  |  Up/Down select  |  " + enter + "  |  Ctrl+c Quit";
 	}
 	auto status_limit = static_cast<std::size_t>(std::max(columns - 1, 1));
 	status = TruncatePlain(status, status_limit);
@@ -1479,8 +1479,7 @@ bool RunInternalPage(const char *label, const SearchResult &result, bool color, 
 		};
 
 		switch (key) {
-		case 'q':
-		case 'Q':
+		case 3:
 			return true;
 		case 27:
 			if (selected_link < links.size()) {
@@ -1752,8 +1751,7 @@ int RunPager(const char *label, SearchFunction search, idx_t limit, const std::s
 				};
 
 				switch (key) {
-				case 'q':
-				case 'Q':
+				case 3:
 					return 0;
 				case 27:
 					if (search) {

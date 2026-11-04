@@ -156,7 +156,7 @@ struct AnswerDrawResult {
 };
 
 AnswerDrawResult DrawAnswerPage(const std::string &reasoning, const std::string &answer, const std::string &query,
-                                bool color, const std::string &status = "Answering  |  Esc stop  |  q Quit",
+                                bool color, const std::string &status = "Answering  |  Esc stop  |  Ctrl+c Quit",
                                 const TextSelection *selection = nullptr) {
 	auto size = GetTerminalSize();
 	auto built = BuildAnswerPage(reasoning, answer, query, color, size.columns);
@@ -450,10 +450,9 @@ AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
 	auto process_key = [&](int key, bool generating) -> bool {
 		switch (key) {
 		case 3:
-			if (!answer.empty() || !reasoning.empty()) {
-				SetClipboard(answer.empty() ? reasoning : answer);
-			}
-			return true;
+			action = AnswerAction::Quit;
+			stop = true;
+			return false;
 		case 27:
 			if (generating) {
 				cancelled = true;
@@ -677,7 +676,7 @@ AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
 		view.follow_tail = false;
 		view.scroll = 0;
 	}
-	auto status = "Answer  |  Enter restart  |  Up/Down  |  PgUp/PgDn scroll  |  Esc quit";
+	auto status = "Answer  |  Enter restart  |  Up/Down  |  PgUp/PgDn scroll  |  Ctrl+c Quit";
 	draw(status);
 	while (true) {
 		auto key = ReadKey();
@@ -777,8 +776,8 @@ bool ShowAnswer(const char *label, const std::string &query, const std::vector<S
 					pending.erase(0, complete);
 				}
 				auto status = is_reasoning
-				                  ? " Thinking  |  Esc stop  |  Enter restart  |  q Quit"
-				                  : "Answering  |  Esc stop  |  Enter restart  |  q Quit";
+				                  ? " Thinking  |  Esc stop  |  Enter restart  |  Ctrl+c Quit"
+				                  : "Answering  |  Esc stop  |  Enter restart  |  Ctrl+c Quit";
 				while (WaitForInput(0)) {
 					auto key = ReadKey();
 					if (handle_mouse(key, status)) {
@@ -789,12 +788,6 @@ bool ShowAnswer(const char *label, const std::string &query, const std::vector<S
 						return false;
 					}
 					if (key == 3) {
-						if (!answer.empty() || !reasoning.empty()) {
-							SetClipboard(answer.empty() ? reasoning : answer);
-						}
-						continue;
-					}
-					if (key == 'q' || key == 'Q') {
 						quit = true;
 						return false;
 					}
