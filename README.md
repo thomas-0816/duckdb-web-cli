@@ -122,12 +122,11 @@ every keystroke. Up/Down selects an entry, Enter opens the full-screen pager at
 the selected result, and a mouse click on a result opens it directly. The list
 ends with `Answer with LLM` and `Quit` entries. Select `Answer with LLM` and
 press Enter to ask the local model about the current query; `Quit` exits the
-application. Esc quits.
-Ctrl-U clears the query (returning to the latest blog articles).
+application. ESC quits.
 Pass `--no-ui` or redirect the output to get the usage message instead.
 
-The same search line is available from inside the pager: press Esc to edit the
-current query, type a new one, and press Enter to apply it. Esc in the search
+The same search line is available from inside the pager: press ESC to edit the
+current query, type a new one, and press Enter to apply it. ESC in the search
 prompt exits the application.
 
 To look for text inside the page that is currently open, press `/` and type a
@@ -167,13 +166,13 @@ In the live search, `--model` also controls the model used by `Answer with LLM`.
 The program searches the documentation and blog as usual, takes the ten
 best-matching content blocks (chunks of at most about 1,800 characters, each
 prefixed with its page title), and sends the question together with those blocks
-to the answer model. `Esc` stops answer generation.
+to the answer model. `ESC` stops answer generation.
 `Enter` stops generation and starts it again, so a new answer can
 be requested without leaving the view. The model's reasoning is streamed below
 the list under `Reasoning` and is hidden as soon as the answer starts. The final
 answer is streamed under `Answer`.
 Use the mouse wheel, PgUp/PgDn, or Home/End to scroll the answer;
-Once the answer is finished, `Esc` exits the application.
+Once the answer is finished, `ESC` exits the application.
 
 ```text
 search> how do I read a parquet file?
@@ -274,13 +273,11 @@ On an interactive terminal the pager takes over the whole terminal using the
 alternate screen buffer. The first line is a tab bar with the titles of the
 results and the active result highlighted. Pressing
 `q` restores the terminal contents that were visible before the search started.
-Pressing `c` copies the current page's Markdown to the clipboard. In the LLM
-answer view, `Ctrl-C` copies the answer. Pressing Esc returns to the search
-prompt with the current query. If not all titles fit, the tab bar shows a window
-around the active title with `…` markers:
+Pressing ESC returns to the search prompt with the current query. If not all titles fit,
+the tab bar shows a window around the active title with `…` markers:
 
 ```text
-Search | Text Types | Types API | Time Types | Relational API | CREATE MACRO Statement
+ Search | Text Types | Types API | Time Types | Relational API | CREATE MACRO Statement
 ------------------------------------------------------------------------------
 ...
  Result 1/10  |  Lines 1-24/80  |  ESC Search  |  / Find-in-page  |  Up/Down scroll  |  Left/Right prev,next  |  q Quit
@@ -303,17 +300,19 @@ Left, p                 Previous result; at the first result, open the search pa
 Right                   Next result; wraps from the last result to the first
 n                       Next result; at the last result, open the search page
 Enter                   Go back from an internal page
-Esc                     Go back; Esc in the search prompt exits the program
+ESC                     Go back; ESC in the search prompt exits the program
 /                       Find text in the current page (Enter repeats)
-c                       Copy the current page's Markdown to the clipboard
 q                       Quit
 ```
 
-The pager captures the mouse so that clicks and the wheel work. Use `c` to copy
-the page source. In the answer view, use `Ctrl-C` to copy the answer.
-The first item in the top line is `Search`, the search page. Click it with the
+The pager captures the mouse so that clicks, dragging, and the wheel work. Drag
+over the content to copy just the text under the pointer.
+Copying uses OSC-52 where the terminal supports it. Otherwise it falls back to
+`xclip` or `xsel` on X11, `wl-clipboard` on Wayland, `pbcopy` on macOS, and the
+native clipboard on Windows.
+The first item in the top line is ` Search`, the search page. Click it with the
 mouse to open the search prompt, or click any title to select that result.
-Pressing Left on the first result selects `Search`; Right on the last result
+Pressing Left on the first result selects ` Search`; Right on the last result
 wraps around to the first result. Esc in the search prompt exits the
 application; Enter applies the edited query.
 
