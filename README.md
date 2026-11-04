@@ -2,36 +2,43 @@
 
 A standalone program for using semantic search on DuckDB's manual and blog:
 
-```sh
+```bash
 docs "How to query a parquet file?"
 docs "How to query a csv file?"
 ```
 
+It offers an interactive terminal UI and a non-interactive mode which can be
+used by LLMs to extend their knowledge with the latest version of DuckDB.
+With the integration of Llama.cpp, questions can also be answered with an LLM.
+
+## How it works
+
 The binary loads the Markdown sources that sit next to it and builds compact
 index files in the same directory on first use. Every query is answered with
-semantic search: the Markdown is embedded with a small GGUF model through
-llama.cpp and searched through an HNSW vector index, so a question such as
+semantic search: the Markdown is embedded with a small embedding model (bge-small-en)
+through Llama.cpp and searched through an HNSW vector index, so a question such as
 "how to read a parquet file?" finds the same pages as the keyword "parquet".
-There is no extension to load and no database connection. A search covers the
-documentation and the blog together.
+A search covers the documentation and the blog together.
 
 The program looks for these files in its own directory:
 
 ```text
 docs                                the binary (includes the embedding model)
-duckdb-blog.md                      blog text
 duckdb-docs.md                      documentation text
+duckdb-blog.md                      blog text
 ```
 
 If either file is missing, it is downloaded automatically from
-`https://blobs.duckdb.org/docs/` at startup; the URL is printed before the
-transfer starts. `docs --update` downloads both files again even when they
-already exist. The answer model is downloaded when `Answer with LLM` is used for
-the first time and the file is missing.
+`https://blobs.duckdb.org/docs/duckdb-blog.md` or `https://blobs.duckdb.org/docs/duckdb-docs.md`
+at startup. `docs --update` downloads both files again even when they
+already exist. To answer a question with an LLM, the LLM file is downloaded once on
+the first attempt of `Answer with LLM` from Huggingface and cached locally in the
+huggingface cache folder.
 
 Generated files are written next to the binary, so the whole installation stays
-in one directory. The cache is invalidated with SHA-1 checksums of the source files,
-so updating a Markdown file rebuilds it automatically. Generated files can be deleted at any time.
+in one directory. The cache is invalidated with checksums of the source files,
+so updating a Markdown file rebuilds the indexes automatically.
+Generated files can be deleted at any time.
 
 ## Using it from the DuckDB shell
 
@@ -49,16 +56,22 @@ Then, from inside `duckdb`:
 .system docs "How to query a csv file?"
 ```
 
+## Using it by an LLM (tool calling)
+
+```bash
+docs --no-ui --raw "<keyword-or-question>" 1
+```
+
 ## Usage
 
-```text
+```bash
 docs [options] [query] [N]
 ```
 
 The default limit is 10 and the maximum is 1000. `--limit 3` and a trailing `3`
 are equivalent:
 
-```sh
+```bash
 docs "how to read a parquet file" 3
 docs --limit 3 "how to read a parquet file"
 ```
@@ -101,7 +114,6 @@ search> parquet
 ...
 11 Answer with LLM
 12 Quit
-10 results  |  Up/Down select  |  Enter open  |  Esc quit
 ```
 
 The empty prompt lists the ten latest blog articles. The search runs again on
@@ -109,11 +121,9 @@ every keystroke. Up/Down selects an entry, Enter opens the full-screen pager at
 the selected result, and a mouse click on a result opens it directly. The list
 ends with `Answer with LLM` and `Quit` entries. Select `Answer with LLM` and
 press Enter to ask the local model about the current query; `Quit` exits the
-application. Esc (or Ctrl-C) quits. Left/Right move the cursor within the query,
-Home/End jump to its start or end, and Backspace/Delete remove a character.
-Ctrl-U clears the query (returning to the latest blog articles) and Ctrl-W
-deletes the previous word. Pass `--no-ui` or redirect the output to get the
-usage message instead.
+application. Esc (or Ctrl-C) quits.
+Ctrl-U clears the query (returning to the latest blog articles).
+Pass `--no-ui` or redirect the output to get the usage message instead.
 
 The same search line is available from inside the pager: press Esc to edit the
 current query, type a new one, and press Enter to apply it. Esc in the search
@@ -121,14 +131,11 @@ prompt exits the application.
 
 To look for text inside the page that is currently open, press `/` and type a
 pattern. Matching text is highlighted and the view jumps to the first match.
-Pressing `/` followed by Enter repeats the search and moves to the next match,
-wrapping around at the end of the page. While a page search is active, `n` and
-`p` jump to the next and previous match. This is useful on long pages such as
-the list of functions.
+While a page search is active, `n` and `p` jump to the next and previous match.
 
 ## Answer with LLM
 
-Pass `--llm` to answer a query directly instead of listing results:
+Pass `--llm` to answer a query directly with an LLM instead of listing results:
 
 ```sh
 docs --llm "how do I read a parquet file?"
@@ -490,8 +497,7 @@ duckdb-docs.md
 duckdb-blog.md
 ```
 
-At run time the binary looks for them next to itself. For compatibility it also
-accepts `data/duckdb-docs.md` and `data/duckdb-blog.md`. When a file is missing,
+At run time the binary looks for them next to itself. When a file is missing,
 it is fetched from `https://blobs.duckdb.org/docs/` and written next to the
 binary. `docs --update` re-downloads both files unconditionally.
 
@@ -527,9 +533,6 @@ word frequencies for spelling correction; it is not an inverted index and does
 not contain page references. The Markdown data files contain the page text that
 is rendered in full. The semantic index stores only vectors and a page id per
 chunk; result text and titles still come from the Markdown data files.
-
-The release binary is compiled with `-ffunction-sections -fdata-sections`, linked
-with `-Wl,--gc-sections`, and stripped.
 
 ## Search behaviour
 
