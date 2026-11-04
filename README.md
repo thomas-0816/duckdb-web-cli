@@ -122,7 +122,7 @@ every keystroke. Up/Down selects an entry, Enter opens the full-screen pager at
 the selected result, and a mouse click on a result opens it directly. The list
 ends with `Answer with LLM` and `Quit` entries. Select `Answer with LLM` and
 press Enter to ask the local model about the current query; `Quit` exits the
-application. Esc (or Ctrl-C) quits.
+application. Esc quits.
 Ctrl-U clears the query (returning to the latest blog articles).
 Pass `--no-ui` or redirect the output to get the usage message instead.
 
@@ -273,16 +273,17 @@ window, while the batch and ubatch are both 2048 tokens.
 On an interactive terminal the pager takes over the whole terminal using the
 alternate screen buffer. The first line is a tab bar with the titles of the
 results and the active result highlighted. Pressing
-`q` (or Ctrl-C) restores the terminal contents that were visible before the
-search started. Pressing Esc returns to the search prompt with the current
-query. If not all titles fit, the tab bar shows a window around the active title
-with `…` markers:
+`q` restores the terminal contents that were visible before the search started.
+Pressing `c` copies the current page's Markdown to the clipboard. In the LLM
+answer view, `Ctrl-C` copies the answer. Pressing Esc returns to the search
+prompt with the current query. If not all titles fit, the tab bar shows a window
+around the active title with `…` markers:
 
 ```text
 Search | Text Types | Types API | Time Types | Relational API | CREATE MACRO Statement
 ------------------------------------------------------------------------------
 ...
-Result 1/10  |  Lines 1-24/80  |  ESC Search  |  / Find-in-page  |  Up/Down scroll  |  Left/Right result  |  q quit
+ Result 1/10  |  Lines 1-24/80  |  ESC Search  |  / Find-in-page  |  Up/Down scroll  |  Left/Right prev,next  |  q Quit
 ```
 
 When the terminal is wide enough, rendered pages also show an outline of their
@@ -304,9 +305,12 @@ n                       Next result; at the last result, open the search page
 Enter                   Go back from an internal page
 Esc                     Go back; Esc in the search prompt exits the program
 /                       Find text in the current page (Enter repeats)
-q, Ctrl-C               Quit
+c                       Copy the current page's Markdown to the clipboard
+q                       Quit
 ```
 
+The pager captures the mouse so that clicks and the wheel work. Use `c` to copy
+the page source. In the answer view, use `Ctrl-C` to copy the answer.
 The first item in the top line is `Search`, the search page. Click it with the
 mouse to open the search prompt, or click any title to select that result.
 Pressing Left on the first result selects `Search`; Right on the last result
@@ -319,7 +323,7 @@ written for older documentation versions: the local page is shown instead of
 the published URL. The internal view has the same scrolling and find-in-page
 keys. Press Left/Right to select a link and Enter to open it; Esc clears the
 selection. Esc or a click on `[Back]` returns to the previous page when no link
-is selected, and `q` or Ctrl-C quits the application.
+is selected, and `q` quits the application.
 
 Blog pages that are only redirect stubs end with an `Open the original post`
 link. The full article lives on the site the DuckDB website redirects to, so the
