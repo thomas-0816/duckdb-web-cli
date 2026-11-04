@@ -76,7 +76,7 @@ Options:
     --color[=WHEN]     Colorize output: auto (default), always, never
     --no-color         Disable colors (same as --color=never)
     --raw              Print the original Markdown without rendering
-    --no-pager         Print every result instead of paging interactively
+    --no-ui            Print results without interactive UI
     --llm              Answer with the local LLM instead of listing results
 -h, --help             Show this help
 ```
@@ -112,7 +112,7 @@ press Enter to ask the local model about the current query; `Quit` exits the
 application. Esc (or Ctrl-C) quits. Left/Right move the cursor within the query,
 Home/End jump to its start or end, and Backspace/Delete remove a character.
 Ctrl-U clears the query (returning to the latest blog articles) and Ctrl-W
-deletes the previous word. Pass `--no-pager` or redirect the output to get the
+deletes the previous word. Pass `--no-ui` or redirect the output to get the
 usage message instead.
 
 The same search line is available from inside the pager: press Esc to edit the
@@ -333,7 +333,7 @@ disabled or broken. Only `http`, `https`, and `mailto` targets are opened.
 The pager is only used when standard input and standard output are both
 terminals and more than one result was found. Otherwise every result is printed
 in sequence, which is what happens in pipelines, in scripts, and through
-`.system` when its output is redirected. Pass `--no-pager` (or `--all`) to
+`.system` when its output is redirected. Pass `--no-ui` (or `--all`) to
 disable paging explicitly. `--limit 1` also prints a single result without the
 pager.
 

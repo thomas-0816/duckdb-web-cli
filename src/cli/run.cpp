@@ -60,7 +60,7 @@ void PrintUsage(const char *program) {
 	std::cerr << "      --color[=WHEN]     Colorize output: auto (default), always, never\n";
 	std::cerr << "      --no-color         Disable colors (same as --color=never)\n";
 	std::cerr << "      --raw              Print the original Markdown without rendering\n";
-	std::cerr << "      --no-pager         Print every result instead of paging interactively\n";
+	std::cerr << "      --no-ui            Print results without interactive UI\n";
 	std::cerr << "      --llm              Answer with the local LLM instead of listing results\n";
 	std::cerr << "  -h, --help             Show this help\n";
 }
@@ -335,11 +335,11 @@ int RunCli(const char *program, const SearchMode &mode, int argc, char **argv) {
 			color_mode = ColorMode::NEVER;
 			continue;
 		}
-		if (argument == "--raw" || argument == "--plain") {
+		if (argument == "--raw") {
 			raw = true;
 			continue;
 		}
-		if (argument == "--no-pager" || argument == "--all") {
+		if (argument == "--no-ui") {
 			no_pager = true;
 			continue;
 		}
