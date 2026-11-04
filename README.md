@@ -1,5 +1,7 @@
 # Tool for viewing and searching docs for DuckDB
 
+<img width="500" height="273" alt="logo" src="logo.jpg" />
+
 A standalone program for using semantic search on DuckDB's manual and blog:
 
 ```bash
@@ -106,7 +108,7 @@ at the top:
 
 ```text
 search> parquet
-------------------------------------------------------------------------------
+
 1 Reading and Writing Parquet Files
 2 Querying Parquet Metadata
 3 Blog: Query Engines: Gatekeepers of the Parquet File Format
@@ -278,9 +280,9 @@ the tab bar shows a window around the active title with `…` markers:
 
 ```text
  Search | Text Types | Types API | Time Types | Relational API | CREATE MACRO Statement
-------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------
 ...
- Result 1/10  |  Lines 1-24/80  |  ESC Search  |  / Find-in-page  |  Up/Down scroll  |  Left/Right prev,next  |  Ctrl+c Quit
+ Result 1/10  |  Lines 1-24/80  |  ESC Search  |  / Find-in-page  |  Up/Down scroll  |  Left/Right prev,next
 ```
 
 When the terminal is wide enough, rendered pages also show an outline of their
