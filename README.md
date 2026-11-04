@@ -1,4 +1,4 @@
-# Cli for viewing and searching docs for DuckDB
+# CLI tool for viewing and searching docs for DuckDB
 
 A standalone program for using semantic search on DuckDB's manual and blog:
 
