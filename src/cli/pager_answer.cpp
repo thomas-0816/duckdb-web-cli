@@ -502,6 +502,8 @@ AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
 			view.scroll = current.max_scroll;
 			view.follow_tail = true;
 			return true;
+		case KEY_RESIZE:
+			return true;
 		case KEY_LEFT:
 			query_cursor = PreviousCodepoint(query, query_cursor);
 			return true;
@@ -589,6 +591,10 @@ AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
 
 	auto handle_pending_input = [&](const std::string &status, bool generating) -> bool {
 		bool redraw = false;
+		if (ResizePending()) {
+			ClearResizePending();
+			redraw = true;
+		}
 		while (!stop && WaitForInput(0)) {
 			if (process_key(ReadKey(), generating)) {
 				redraw = true;
@@ -778,6 +784,10 @@ bool ShowAnswer(const char *label, const std::string &query, const std::vector<S
 				auto status = is_reasoning
 				                  ? " Thinking  |  Esc stop  |  Enter restart  |  Ctrl+c Quit"
 				                  : "Answering  |  Esc stop  |  Enter restart  |  Ctrl+c Quit";
+				if (ResizePending()) {
+					ClearResizePending();
+					draw(status);
+				}
 				while (WaitForInput(0)) {
 					auto key = ReadKey();
 					if (handle_mouse(key, status)) {

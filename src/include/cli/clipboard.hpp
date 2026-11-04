@@ -87,6 +87,7 @@ enum class PagerClickAction {
 	None,
 	Redraw,
 	Quit,
+	Back,
 	EditQuery,
 	OpenLink,
 };

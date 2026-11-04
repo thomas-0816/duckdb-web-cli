@@ -550,7 +550,7 @@ PagerClick HandlePagerClick(const PagerPage &page, int row, std::size_t column, 
 	if (row == 0) {
 		if (internal) {
 			// The Back label in the first header line.
-			result.action = PagerClickAction::Quit;
+			result.action = PagerClickAction::Back;
 			return result;
 		}
 		bool hit = false;

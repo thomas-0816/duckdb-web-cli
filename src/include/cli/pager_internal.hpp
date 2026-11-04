@@ -31,6 +31,7 @@ enum : int {
 	KEY_MOUSE,
 	KEY_WHEEL_UP,
 	KEY_WHEEL_DOWN,
+	KEY_RESIZE,
 };
 
 constexpr std::size_t WHEEL_SCROLL_LINES = 3;
@@ -86,6 +87,12 @@ public:
 
 bool WaitForInput(int milliseconds);
 int ReadKey();
+
+//! Whether the terminal was resized since the last ReadKey. ReadKey reports
+//! the resize as KEY_RESIZE; these helpers let views that poll for input (such
+//! as the streaming answer view) notice it without waiting for a key.
+bool ResizePending();
+void ClearResizePending();
 
 std::size_t PreviousCodepoint(const std::string &text, std::size_t position);
 std::size_t NextCodepoint(const std::string &text, std::size_t position);

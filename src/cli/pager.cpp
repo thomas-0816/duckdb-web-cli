@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
@@ -27,6 +28,23 @@
 #include <unistd.h>
 
 namespace docs {
+
+namespace {
+
+//! Set from the SIGWINCH handler, so it must stay signal-safe.
+volatile sig_atomic_t g_resize_pending = 0;
+
+void HandleResizeSignal(int) {
+	g_resize_pending = 1;
+}
+
+//! The pager screens can nest (the search prompt is opened from the pager),
+//! so only the outermost screen installs and restores the handler.
+int g_screen_depth = 0;
+struct sigaction g_previous_resize_action = {};
+bool g_resize_handler_installed = false;
+
+} // namespace
 
 MouseEvent g_mouse_event;
 
@@ -572,6 +590,15 @@ RawMode::~RawMode() {
 }
 
 PagerScreen::PagerScreen(bool mouse) {
+	// A resize interrupts the blocking read in ReadKey, which turns it into a
+	// KEY_RESIZE event. SA_RESTART must stay off for that to work.
+	if (g_screen_depth++ == 0) {
+		struct sigaction action = {};
+		action.sa_handler = HandleResizeSignal;
+		sigemptyset(&action.sa_mask);
+		action.sa_flags = 0;
+		g_resize_handler_installed = sigaction(SIGWINCH, &action, &g_previous_resize_action) == 0;
+	}
 	// Always take over the whole terminal: enter the alternate screen,
 	// hide the cursor and start from a blank page.
 	std::cout << "\x1b[?1049h\x1b[?25l\x1b[H\x1b[2J";
@@ -584,6 +611,18 @@ PagerScreen::PagerScreen(bool mouse) {
 PagerScreen::~PagerScreen() {
 	SetMouseCapture(false);
 	std::cout << "\x1b[?25h\x1b[?1049l" << std::flush;
+	if (--g_screen_depth == 0 && g_resize_handler_installed) {
+		sigaction(SIGWINCH, &g_previous_resize_action, nullptr);
+		g_resize_handler_installed = false;
+	}
+}
+
+bool ResizePending() {
+	return g_resize_pending != 0;
+}
+
+void ClearResizePending() {
+	g_resize_pending = 0;
 }
 
 bool WaitForInput(int milliseconds) {
@@ -593,14 +632,46 @@ bool WaitForInput(int milliseconds) {
 
 int ReadByte() {
 	unsigned char byte = 0;
-	if (read(STDIN_FILENO, &byte, 1) != 1) {
+	for (;;) {
+		auto count = read(STDIN_FILENO, &byte, 1);
+		if (count == 1) {
+			return byte;
+		}
+		if (count < 0 && errno == EINTR) {
+			if (g_resize_pending) {
+				return KEY_RESIZE;
+			}
+			continue;
+		}
 		return -1;
 	}
-	return byte;
 }
 
 int ReadKey() {
+	// Block in poll rather than read so a resize that arrives between the
+	// pending check and the read cannot leave us waiting for the next key.
+	for (;;) {
+		if (g_resize_pending) {
+			ClearResizePending();
+			return KEY_RESIZE;
+		}
+		struct pollfd descriptor = {STDIN_FILENO, POLLIN, 0};
+		auto ready = poll(&descriptor, 1, -1);
+		if (ready < 0) {
+			if (errno == EINTR) {
+				continue;
+			}
+			return 3;
+		}
+		if (ready > 0) {
+			break;
+		}
+	}
 	int key = ReadByte();
+	if (key == KEY_RESIZE) {
+		ClearResizePending();
+		return KEY_RESIZE;
+	}
 	if (key < 0) {
 		return 3;
 	}
@@ -608,14 +679,26 @@ int ReadKey() {
 		return key;
 	}
 	if (!WaitForInput(30)) {
+		if (ResizePending()) {
+			ClearResizePending();
+			return KEY_RESIZE;
+		}
 		return 27;
 	}
 	int second = ReadByte();
+	if (second == KEY_RESIZE) {
+		ClearResizePending();
+		return KEY_RESIZE;
+	}
 	if (second != '[' && second != 'O') {
 		return 27;
 	}
 	if (second == 'O') {
 		int third = ReadByte();
+		if (third == KEY_RESIZE) {
+			ClearResizePending();
+			return KEY_RESIZE;
+		}
 		if (third == 'A') {
 			return KEY_UP;
 		}
@@ -640,6 +723,10 @@ int ReadKey() {
 	std::string sequence;
 	while (WaitForInput(20)) {
 		int next = ReadByte();
+		if (next == KEY_RESIZE) {
+			ClearResizePending();
+			return KEY_RESIZE;
+		}
 		if (next < 0) {
 			break;
 		}
@@ -836,6 +923,9 @@ std::string MakeStatus(std::size_t index, std::size_t total, std::size_t top, st
 	if (!page_query.empty()) {
 		status += "  /" + page_query;
 	}
+	if (internal) {
+		status += "  |  ESC Back";
+	}
 	if (!internal) {
 		status += "  |  ESC Search";
 	}
@@ -844,12 +934,13 @@ std::string MakeStatus(std::size_t index, std::size_t total, std::size_t top, st
 	if (!internal) {
 		status += "  |  Left/Right prev,next";
 	} else if (answer) {
-		status += "  |  Left/Right link  |  Enter restart  |  Ctrl+c Quit";
-	} else {
-		status += "  |  Left/Right link  |  Enter/Esc back";
+		status += "  |  Left/Right link  |  Enter restart";
 	}
 	auto limit = static_cast<std::size_t>(std::max(columns - 1, 1));
 	status += "  |  Ctrl+c Quit";
+	if (!status.empty() && status[0] != ' ') {
+		status = " " + status;
+	}
 	if (status.size() > limit) {
 		status.resize(limit);
 	}
@@ -876,10 +967,12 @@ void Draw(const std::vector<PagerPage> &pages, std::size_t index, std::size_t &s
 	}
 
 	std::string output;
-	output += "\x1b[H";
+	// Reset first so a style left over from the previous frame cannot leak
+	// into the redraw after a resize or scroll.
+	output += "\x1b[0m\x1b[H";
 	for (auto &line : page.header) {
 		output += line;
-		output += "\x1b[K\n";
+		output += "\x1b[K\x1b[0m\n";
 	}
 
 	// Fill the whole screen. When the page is shorter than the terminal the
@@ -928,7 +1021,7 @@ void Draw(const std::vector<PagerPage> &pages, std::size_t index, std::size_t &s
 				output += toc_line;
 			}
 		}
-		output += "\x1b[K\n";
+		output += "\x1b[K\x1b[0m\n";
 	}
 
 	if (color) {
@@ -943,10 +1036,7 @@ void Draw(const std::vector<PagerPage> &pages, std::size_t index, std::size_t &s
 		status.append(status_limit - status.size(), ' ');
 	}
 	output += status;
-	if (color) {
-		output += RESET;
-	}
-	output += "\x1b[K\x1b[?25l";
+	output += "\x1b[0m\x1b[K\x1b[?25l";
 	std::cout << output << std::flush;
 }
 
@@ -1422,6 +1512,7 @@ QueryEdit EditQuery(const char *label, SearchFunction search, idx_t limit, const
 bool RunInternalPage(const char *label, const SearchResult &result, bool color, bool raw, bool *regenerate) {
 	std::vector<PagerPage> pages;
 	auto size = GetTerminalSize();
+	int last_rows = size.rows;
 	pages.push_back(BuildInternalPage(result, color, raw, size.columns));
 	auto links = CollectPageLinks(pages[0]);
 	std::size_t selected_link = std::size_t(-1);
@@ -1445,6 +1536,43 @@ bool RunInternalPage(const char *label, const SearchResult &result, bool color, 
 
 	while (true) {
 		int key = ReadKey();
+		bool resized = false;
+		if (key == KEY_RESIZE) {
+			// Reflow the page for the new width. Keeping the old line breaks
+			// would make the terminal wrap them again and scroll the top of the
+			// screen away.
+			auto new_size = GetTerminalSize();
+			auto old_header_rows = static_cast<int>(pages[0].header.size());
+			auto old_available = static_cast<std::size_t>(
+			    std::max(std::max(last_rows, 3) - old_header_rows - 1, 1));
+			auto old_max_scroll =
+			    pages[0].content.size() > old_available ? pages[0].content.size() - old_available : 0;
+			bool was_at_top = scroll == 0;
+			bool was_at_bottom = old_max_scroll > 0 && scroll >= old_max_scroll;
+
+			pages[0] = BuildInternalPage(result, color, raw, new_size.columns);
+			links = CollectPageLinks(pages[0]);
+			auto new_header_rows = static_cast<int>(pages[0].header.size());
+			auto new_available = static_cast<std::size_t>(
+			    std::max(std::max(new_size.rows, 3) - new_header_rows - 1, 1));
+			auto new_max_scroll =
+			    pages[0].content.size() > new_available ? pages[0].content.size() - new_available : 0;
+			if (was_at_top) {
+				scroll = 0;
+			} else if (was_at_bottom) {
+				scroll = new_max_scroll;
+			} else {
+				scroll = std::min(scroll, new_max_scroll);
+			}
+
+			selected_link = std::size_t(-1);
+			selected_toc = std::size_t(-1);
+			selected_toc_scroll = 0;
+			mouse.selection = TextSelection();
+			mouse.pressed = false;
+			resized = true;
+			key = 0;
+		}
 		bool redraw = true;
 		auto terminal = GetTerminalSize();
 		auto &page = pages[0];
@@ -1464,6 +1592,8 @@ bool RunInternalPage(const char *label, const SearchResult &result, bool color, 
 			switch (click.action) {
 			case PagerClickAction::Quit:
 				return true;
+			case PagerClickAction::Back:
+				return false;
 			case PagerClickAction::OpenLink:
 				return open_link(click.link);
 			case PagerClickAction::Redraw:
@@ -1482,10 +1612,6 @@ bool RunInternalPage(const char *label, const SearchResult &result, bool color, 
 		case 3:
 			return true;
 		case 27:
-			if (selected_link < links.size()) {
-				selected_link = std::size_t(-1);
-				break;
-			}
 			return false;
 		case '\r':
 		case '\n':
@@ -1638,6 +1764,9 @@ bool RunInternalPage(const char *label, const SearchResult &result, bool color, 
 				                              false, header_rows, available, max_scroll, scroll, click_index,
 				                              selected_toc, selected_toc_scroll, click_edit_query,
 				                              click_resume_index);
+				if (click.action == PagerClickAction::Back) {
+					return false;
+				}
 				if (apply_click(click)) {
 					return true;
 				}
@@ -1650,29 +1779,23 @@ bool RunInternalPage(const char *label, const SearchResult &result, bool color, 
 			break;
 		}
 		default:
-			redraw = false;
+			redraw = resized;
 			break;
 		}
 
 		if (redraw) {
 			const cli::TextLink *highlight = nullptr;
 			std::size_t highlight_line = std::size_t(-1);
-			std::string status;
 			if (selected_link < links.size()) {
 				highlight = &links[selected_link].link;
 				highlight_line = links[selected_link].line;
-				auto plain = MakePlainLine(page.content[highlight_line]);
-				auto start = std::min(highlight->start, plain.text.size());
-				auto end = std::min(highlight->end, plain.text.size());
-				auto text = plain.text.substr(start, end - start);
-				status = "Link " + std::to_string(selected_link + 1) + "/" + std::to_string(links.size()) + ": " +
-				         text + "  |  Enter open  |  Left/Right select  |  Esc clear";
 			}
 			auto toc_selection =
 			    selected_toc < page.toc.size() && selected_toc_scroll == scroll ? selected_toc : std::size_t(-1);
-			Draw(pages, 0, scroll, color, page_query, true, status, highlight_line, highlight,
+			Draw(pages, 0, scroll, color, page_query, true, std::string(), highlight_line, highlight,
 			     regenerate != nullptr, toc_selection, &mouse.selection);
 		}
+		last_rows = terminal.rows;
 	}
 }
 
@@ -1693,6 +1816,7 @@ int RunPager(const char *label, SearchFunction search, idx_t limit, const std::s
 
 		{
 			auto size = GetTerminalSize();
+			int last_rows = size.rows;
 			std::vector<PagerPage> pages;
 			pages.reserve(current_results.size());
 			for (std::size_t i = 0; i < current_results.size(); i++) {
@@ -1711,6 +1835,52 @@ int RunPager(const char *label, SearchFunction search, idx_t limit, const std::s
 
 			while (true) {
 				int key = ReadKey();
+				bool resized = false;
+				if (key == KEY_RESIZE) {
+					// Rebuild every tab for the new width so the content is
+					// wrapped for the current terminal instead of the old one.
+					auto new_size = GetTerminalSize();
+					std::vector<bool> was_at_top(positions.size(), false);
+					std::vector<bool> was_at_bottom(positions.size(), false);
+					for (std::size_t i = 0; i < pages.size() && i < positions.size(); i++) {
+						auto old_header_rows = static_cast<int>(pages[i].header.size());
+						auto old_available = static_cast<std::size_t>(
+						    std::max(std::max(last_rows, 3) - old_header_rows - 1, 1));
+						auto old_max_scroll = pages[i].content.size() > old_available
+						                          ? pages[i].content.size() - old_available
+						                          : 0;
+						was_at_top[i] = positions[i] == 0;
+						was_at_bottom[i] = old_max_scroll > 0 && positions[i] >= old_max_scroll;
+					}
+
+					std::vector<PagerPage> rebuilt;
+					rebuilt.reserve(current_results.size());
+					for (std::size_t i = 0; i < current_results.size(); i++) {
+						rebuilt.push_back(BuildPage(current_results, i, color, raw, new_size.columns));
+					}
+					pages = std::move(rebuilt);
+					for (std::size_t i = 0; i < pages.size() && i < positions.size(); i++) {
+						auto header_rows = static_cast<int>(pages[i].header.size());
+						auto available = static_cast<std::size_t>(
+						    std::max(std::max(new_size.rows, 3) - header_rows - 1, 1));
+						auto visible = std::min(pages[i].content.size(), available);
+						auto max_scroll =
+						    pages[i].content.size() > visible ? pages[i].content.size() - visible : 0;
+						if (was_at_top[i]) {
+							positions[i] = 0;
+						} else if (was_at_bottom[i]) {
+							positions[i] = max_scroll;
+						} else {
+							positions[i] = std::min(positions[i], max_scroll);
+						}
+					}
+					selected_toc = std::size_t(-1);
+					selected_toc_scroll = 0;
+					mouse.selection = TextSelection();
+					mouse.pressed = false;
+					resized = true;
+					key = 0;
+				}
 				bool redraw = true;
 				auto terminal = GetTerminalSize();
 				auto &page = pages[index];
@@ -1724,6 +1894,8 @@ int RunPager(const char *label, SearchFunction search, idx_t limit, const std::s
 					switch (click.action) {
 					case PagerClickAction::Quit:
 						return true;
+					case PagerClickAction::Back:
+						return false;
 					case PagerClickAction::OpenLink: {
 						SearchResult target;
 						auto url = ExternalLinkTarget(click.link.url);
@@ -1915,7 +2087,7 @@ int RunPager(const char *label, SearchFunction search, idx_t limit, const std::s
 					break;
 				}
 				default:
-					redraw = false;
+					redraw = resized;
 					break;
 				}
 
@@ -1929,6 +2101,7 @@ int RunPager(const char *label, SearchFunction search, idx_t limit, const std::s
 					Draw(pages, index, positions[index], color, page_query, false, std::string(), std::size_t(-1),
 					     nullptr, false, toc_selection, &mouse.selection);
 				}
+				last_rows = terminal.rows;
 			}
 		}
 
