@@ -144,40 +144,25 @@ docs --llm "how do I read a parquet file?"
 On a terminal, `--llm` opens a live answer view: the reasoning is shown while
 the model thinks and hidden once the answer starts, and the finished answer can
 be scrolled. When the output is not a terminal, reasoning is streamed under a
-`Reasoning` heading followed by the answer under an `Answer` heading, then the
-source pages; load and prompt progress go to standard error. The flag requires
-a query; `docs --llm` on its own prints an error.
+`Reasoning` heading followed by the answer under an `Answer` heading.
+Load and prompt progress go to standard error. The flag requires a query.
 
 Select `Answer with LLM` in the result list and press Enter. The first use loads
-the MiniCPM5 answer model and shows a progress bar while the weights are read.
-When `MiniCPM5-1B-Q4_K_M.gguf` is missing, it is downloaded from Hugging Face
-through llama.cpp's downloader and stored in the standard Hugging Face cache
-(`~/.cache/huggingface/hub`); the same progress bar shows the transfer. The model
-stays loaded for the rest of the session.
+the local MiniCPM5 answer model and shows a progress bar while the weights are read.
+When the local MiniCPM5 model is missing, it is downloaded from HuggingFace
+through llama.cpp's downloader and stored in the standard HuggingFace cache
+(`~/.cache/huggingface/hub`). The model stays loaded for the rest of the session.
 
 The program searches the documentation and blog as usual, takes the ten
 best-matching content blocks (chunks of at most about 1,800 characters, each
 prefixed with its page title), and sends the question together with those blocks
-to `MiniCPM5-1B-Q4_K_M.gguf`. The prompt is rendered with the chat template that
-ships in the model's GGUF metadata, using the Jinja engine in llama.cpp's common
-library, so the special tokens and the thinking block match the model exactly.
-A progress bar is shown while the prompt is being processed, before the first
-token. Loading the answer model shows the same kind of progress below the still
-visible result list. While the answer streams, the search result list stays
-visible at the top of the screen. Up/Down selects a result and clicking it opens
-that result; `Enter` stops generation and starts it again, so a new answer can
+to `MiniCPM5-1B-Q4_K_M.gguf`. `Esc` stops anwer generation.
+`Enter` stops generation and starts it again, so a new answer can
 be requested without leaving the view. The model's reasoning is streamed below
 the list under `Reasoning` and is hidden as soon as the answer starts. The final
-answer is streamed under `Answer`; there is no separate source list, because
-the search results above are the sources. The cursor stays on the query line:
-Left/Right move it, and typing a character, Backspace, or Delete returns to the
-search prompt and applies that key, so the query can be changed without leaving
-the view. Use the mouse wheel, PgUp/PgDn, or Home/End to scroll the answer;
-wheel scrolling never changes the selected result. `Esc` stops generation; once
-the answer is finished, `Esc` exits the application. If generation is stopped
-before the answer starts, the partial reasoning stays visible. The result list
-and the answer remain on screen together after generation completes, so another
-result can be opened without leaving the answer view.
+answer is streamed under `Answer`.
+Use the mouse wheel, PgUp/PgDn, or Home/End to scroll the answer;
+Once the answer is finished, `Esc` exits the application.
 
 ```text
 search> how do I read a parquet file?
@@ -197,22 +182,20 @@ Every query is embedded and searched by meaning. This handles natural-language
 questions that do not contain the right keywords:
 
 ```sh
-docs "how to read a parquet file?" 3
-docs "parquet" 3
+docs "how to read a parquet file?"
+docs "parquet"
 ```
 
 Both commands return the Parquet pages first. Short keyword queries use the same
 semantic index; there is no separate lexical ranking.
 
 The semantic index is built from the Markdown the first time it is needed. The
-model is the Q8_0 GGUF build of `BAAI/bge-small-en-v1.5`, embedded in the binary
-and loaded through llama.cpp. Every page is cleaned of link markup and split
-into chunks of at most about 1800 characters, then embedded with the page title
-as context. Code fences and tables stay intact, and a table header is repeated
-when a chunk starts in the middle of a table. The normalized vectors are stored
+embedding model is `BAAI/bge-small-en-v1.5`, embedded in the binary and loaded
+through llama.cpp. Every page is split into chunks of at most about 1800 characters,
+then embedded with the page title as context. The normalized vectors are stored
 in an HNSW index and searched with cosine similarity. Results are grouped back
 into complete pages, so several matching chunks from the same page still produce
-one result. The index and its metadata are cached next to the other generated
+one result. The HNSW index and its metadata are cached next to the other generated
 files:
 
 ```text
@@ -234,19 +217,19 @@ docs: building semantic index for bge-small-en-v1.5-q8_0 (4824 chunks, 4 threads
 docs: embedding chunks 1206/4824 (25%, 0:23 elapsed)
 ```
 
-Index builds use four CPU threads and offload the model to the GPU when a
-backend is available, which keeps the rest of the system responsive. Later
-searches load the saved HNSW index in a fraction of a second.
+Index builds use four CPU threads and offload the model to the GPU if possible,
+which keeps the rest of the system responsive. Later searches load the saved HNSW
+index in a fraction of a second.
 
-The model is `BAAI/bge-small-en-v1.5` in its Q8_0 GGUF form. The model bytes are
+The embedding model is `BAAI/bge-small-en-v1.5`. The model bytes are
 linked into the binary, so the release is a single self-contained executable:
 there is no model file to copy. The llama.cpp submodule is also linked
 statically. The only runtime dependency is the platform GPU stack: the Vulkan
-loader on Linux and Windows, and Metal on macOS. Fetch the model only when
-building:
+loader on Linux and Windows, and Metal on macOS. Refresh the embedding model if
+necessary before building:
 
 ```sh
-scripts/fetch_models.sh
+wget https://huggingface.co/ggml-org/bge-small-en-v1.5-Q8_0-GGUF/resolve/main/bge-small-en-v1.5-q8_0.gguf
 ```
 
 ## Search quality
@@ -271,21 +254,14 @@ Short keyword queries also get exact-term handling:
 
 Longer natural-language queries skip the exact-term boost, so they are ranked
 purely by embedding similarity.
-
-The measured first build took 1 min 36 s on an AMD Radeon 780M through Vulkan
-with about 203 MB of memory, and the GPU does the embedding work while the CPU
-stays mostly idle. Cached semantic queries take about 0.2 s including process
-startup. The embedding context is capped at the model's 512-token training
-window, while the batch and micro-batch are both 4096 tokens.
+The embedding context is capped at the model's 512-token training
+window, while the batch and ubatch are both 2048 tokens.
 
 ## Paging results
 
 On an interactive terminal the pager takes over the whole terminal using the
 alternate screen buffer. The first line is a tab bar with the titles of the
-results and the active result highlighted. The second line is a rule. Both lines
-stay fixed while the page content scrolls beneath them. The status line is
-always on the last row, so the page fills the screen. Every page ends with a
-blank line, so the last line is never flush against the status bar. Pressing
+results and the active result highlighted. Pressing
 `q` (or Ctrl-C) restores the terminal contents that were visible before the
 search started. Pressing Esc returns to the search prompt with the current
 query. If not all titles fit, the tab bar shows a window around the active title
@@ -335,12 +311,12 @@ link opens it in the browser.
 Links to other sites open with the desktop's default handler (`xdg-open` or
 `gio open` on Linux, `open` on macOS). This uses the pager's own mouse handling,
 so content links stay clickable even in terminals whose OSC 8 support is
-disabled or broken. Only `http`, `https`, and `mailto` targets are opened.
+disabled or broken. Only `http` and `https` targets are opened.
 
 The pager is only used when standard input and standard output are both
 terminals and more than one result was found. Otherwise every result is printed
 in sequence, which is what happens in pipelines, in scripts, and through
-`.system` when its output is redirected. Pass `--no-ui` (or `--all`) to
+`.system` when its output is redirected. Pass `--no-ui` to
 disable paging explicitly. `--limit 1` also prints a single result without the
 pager.
 
@@ -351,14 +327,14 @@ default: headings are colored, emphasis is bold or italic, lists keep their
 markers, block quotes get a bar, and tables use box-drawing characters. Code
 blocks get a dim `│ ` gutter.
 
-Fenced blocks marked ```` ```sql ```` (and ```` ```plsql ````) are syntax
+Fenced blocks marked ```` ```sql ```` are syntax
 highlighted: keywords, types, strings, numbers, comments, function names and
 operators get distinct colors. Highlighting understands line and nested block
 comments, single-quoted strings with doubled quotes, quoted identifiers, and
 dollar-quoted strings. `--no-color` and `--color=never` produce plain text while
 keeping the gutter.
 
-Links in the rendered page are emitted as OSC 8 terminal hyperlinks. The label
+Links in the rendered page are emitted as terminal hyperlinks. The label
 is underlined and clickable, but the URL is not printed, which keeps pages
 readable. Links to the bundled documentation are blue, while links to other
 sites are orange. Relative Markdown targets and bare `#fragment` anchors are resolved to
@@ -367,36 +343,20 @@ published page. This works in terminals that support OSC 8 (GNOME Terminal,
 iTerm2, Kitty, WezTerm, Alacritty, Windows Terminal, and others). Use `--raw` to
 see the original Markdown including link targets. The pager does not depend on
 that terminal support: it records the screen span of every link and opens the
-target itself when the link is clicked (see [Paging results](#paging-results)).
+target itself when the link is clicked.
 
 The result titles in the pager's top line and the result list in the search
-prompt are selected with the mouse instead: clicking a title switches to that
+prompt can be selected with the mouse: clicking a title switches to that
 result, and clicking a search result opens it. This works in any terminal that
-supports standard mouse reporting; it does not depend on OSC 8 links.
+supports standard mouse reporting.
 
 Konsole supports OSC 8 but disables it by default. Enable **Allow escape
 sequences for links** under **Settings → Edit Current Profile → Mouse →
-Miscellaneous**. The corresponding profile setting is
-`AllowEscapedLinks=true` in the `[Interaction Options]` group; it can also be
-set from a shell:
-
-```sh
-kwriteconfig5 --file "$HOME/.local/share/konsole/Profile 1.profile" \
-  --group "Interaction Options" --key AllowEscapedLinks true
-```
-
-Konsole versions before 24.12.3 apply the setting to a view only when a profile
-is applied after the view has been created. Editing the profile or switching
-profiles in a running window therefore enables escaped links, but merely
-restarting Konsole does not. Link clicks in the pager are not affected by this
-bug because they do not rely on OSC 8.
+Miscellaneous**.
 
 Color and hyperlinks are enabled automatically when standard output is a
 terminal. `--color=always` forces them on, and `--no-color` emits plain text with
 no ANSI escapes. `NO_COLOR` and `CLICOLOR_FORCE` are honored in `auto` mode.
-
-Markdown parsing uses the vendored [md4c](https://github.com/mity/md4c) library
-(MIT license, in `third_party/md4c`). No system Markdown library is required.
 
 ## Building
 
@@ -405,10 +365,9 @@ Requirements:
 - a C99 compiler and a C++17 compiler
 - CMake 3.16 or newer
 - OpenSSL development headers, used to download the Markdown sources over HTTPS
-- the Q8_0 embedding model file (downloaded by a script and embedded at build
-  time)
-- on Linux and Windows, the Vulkan SDK (including `glslc`); on macOS, the
-  Metal toolchain that ships with Xcode
+- the embedding model file
+- on Linux and Windows, the Vulkan SDK (including `glslc`)
+- on macOS, the Metal toolchain that ships with Xcode
 
 The llama.cpp source in `third_party/llama.cpp` is a git submodule pinned to the
 latest stable release. Check it out first:
@@ -417,31 +376,16 @@ latest stable release. Check it out first:
 git submodule update --init --recursive
 ```
 
-It is compiled as a static library with a GPU backend and linked into the
+Docs is compiled as a static library with a GPU backend and linked into the
 binary: Vulkan on Linux and Windows, Metal on macOS. The CPU backend is still
-available, so systems without a usable GPU fall back automatically. On Linux the
+available, so systems without a GPU fall back automatically. On Linux the
 binary links against the Vulkan loader (`libvulkan.so.1`) and uses the installed
 driver at runtime. On x86-64 the build uses `-march=x86-64-v3`, so the resulting
 binary requires AVX2 (Haswell or newer); on ARM it targets the `armv8-a`
-baseline. The build enables llama.cpp's common library because answer mode uses
-its Jinja engine to apply the chat template from the GGUF metadata. Fetch the
-embedding model:
+baseline. The answer model is not part of the build. When it is missing, answer mode
+downloads it into the HuggingFace cache on first use.
 
-```sh
-scripts/fetch_models.sh
-```
-
-The answer model is not part of the build. When it is missing, answer mode
-downloads it into the Hugging Face cache on first use.
-
-Then build with CMake:
-
-```sh
-cmake -S . -B build/release -DCMAKE_BUILD_TYPE=Release
-cmake --build build/release --parallel 8
-```
-
-or with the included convenience Makefile:
+Build with make:
 
 ```sh
 make
@@ -453,14 +397,14 @@ The build produces the binary and copies its source data next to it:
 build/release/docs
 build/release/duckdb-docs.md
 build/release/duckdb-blog.md
+build/release/semantic-bge-small-en-v1.5-q8_0.hnsw
+build/release/semantic-bge-small-en-v1.5-q8_0.meta
 ```
 
-The Linux build with Vulkan shaders is about 84 MB because it contains the Q8_0
-embedding model (~35 MB), llama.cpp, and the compiled GPU shaders. The macOS
-build with Metal is smaller. The MiniCPM5 answer model (~656 MB) is downloaded on
-demand into the Hugging Face cache. The embedding model is linked into the
-executable; the answer model is loaded from disk when answer mode is opened for
-the first time.
+The build contains the embedding model, llama.cpp, and the compiled GPU shaders.
+The MiniCPM5 answer model (~656 MB) is downloaded on demand into the local HuggingFace cache.
+The embedding model is linked into the executable; the answer model is loaded from disk when the
+answer mode is opened for the first time.
 
 Run it directly:
 
@@ -475,18 +419,10 @@ To install it into `~/.local/bin`:
 make install
 ```
 
-or, equivalently:
-
-```sh
-cmake --install build/release --prefix "$HOME/.local"
-```
-
-The install step copies the binary, the MiniCPM5 answer model, and the two
-Markdown sources into `$HOME/.local/bin`. Make sure that directory is on `PATH`;
-llama.cpp and the embedding model are linked statically, and the answer model is
-loaded from its file next to the binary when answer mode is used. The only
-runtime requirement beyond those files is the platform GPU stack. After that, `.system docs "..."` works directly inside the
-DuckDB shell.
+The install step copies the binary, Markdown sources and indexes into `$HOME/.local/bin`.
+Make sure that directory is on `PATH`; llama.cpp and the embedding model are linked statically.
+The only runtime requirement beyond those files is the platform GPU stack.
+After that, `.system docs "..."` works directly inside the DuckDB shell.
 
 ## How the data is built
 
@@ -498,9 +434,9 @@ duckdb-blog.md
 ```
 
 At run time the binary looks for them next to itself. When a file is missing,
-it is fetched from `https://blobs.duckdb.org/docs/` and written next to the
-binary. `docs --update` re-downloads both files unconditionally.
-
+it is fetched from `https://blobs.duckdb.org/docs/duckdb-docs.md` or
+`https://blobs.duckdb.org/docs/duckdb-blog.md` and written to the folder of
+the binary. `docs --update` re-downloads both files.
 On first use, the program splits each Markdown file at headings (`#` through
 `######`) and writes section metadata plus a copy of the normalized text. These
 files are written next to the binary:
@@ -558,4 +494,3 @@ There is no prefix, fuzzy, or phonetic index. Spelling correction handles common
 typos such as `parket` and `varkar`; the remaining ranking is semantic.
 
 Internal anchors are rewritten to `duckdb.org` links in the returned Markdown.
-

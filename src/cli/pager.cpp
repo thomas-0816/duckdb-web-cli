@@ -474,7 +474,7 @@ bool OpenUrl(const std::string &url) {
 			c = static_cast<char>(c - 'A' + 'a');
 		}
 	}
-	if (scheme != "http" && scheme != "https" && scheme != "mailto") {
+	if (scheme != "http" && scheme != "https") {
 		return false;
 	}
 
