@@ -1,5 +1,6 @@
 #include "cli/pager.hpp"
 
+#include "cli/clipboard.hpp"
 #include "cli/markdown.hpp"
 #include "generation.hpp"
 
@@ -47,13 +48,6 @@ enum : int {
 };
 
 constexpr std::size_t WHEEL_SCROLL_LINES = 3;
-
-struct MouseEvent {
-	int button = 0;
-	int column = 0;
-	int row = 0;
-	bool press = false;
-};
 
 MouseEvent g_mouse_event;
 
@@ -220,12 +214,6 @@ Tab MakeTab(const std::string &title, bool active, bool color) {
 	return tab;
 }
 
-struct TabHit {
-	std::size_t first = 0;
-	std::size_t last = 0;
-	std::size_t tab = 0;
-};
-
 struct TabBarLayout {
 	std::string text;
 	std::vector<TabHit> hits;
@@ -236,10 +224,10 @@ TabBarLayout MakeTabBar(const std::vector<SearchResult> &results, std::size_t in
 	std::vector<Tab> tabs;
 	tabs.reserve(results.size() + 1);
 	Tab search_tab;
-	search_tab.plain = "Search";
+	search_tab.plain = " Search";
 	for (auto &result : results) {
 		if (!result.corrected_query.empty()) {
-			search_tab.plain = "Search: " + result.corrected_query;
+			search_tab.plain = " Search: " + result.corrected_query;
 			break;
 		}
 	}
@@ -321,36 +309,6 @@ TabBarLayout MakeTabBar(const std::vector<SearchResult> &results, std::size_t in
 	return make_range(first, last);
 }
 
-struct PagerPage {
-	std::vector<std::string> header;
-	std::vector<std::string> content;
-	std::vector<std::vector<cli::TextLink>> content_links;
-	std::vector<TabHit> tab_hits;
-	//! Section headings shown in the outline on the right side.
-	struct TocEntry {
-		std::string text;
-		std::size_t line = 0;
-	};
-	std::vector<TocEntry> toc;
-	//! Number of columns used by the rendered page content.
-	std::size_t content_width = 0;
-	//! Width of the outline itself, excluding the gap before it. Zero when the
-	//! outline is hidden.
-	std::size_t toc_width = 0;
-	//! First column of the outline (zero based).
-	std::size_t toc_column = 0;
-	double score = 0;
-};
-
-constexpr std::size_t TOC_GAP = 2;
-//! Keep the outline clear of the terminal's right edge.
-constexpr std::size_t TOC_RIGHT_MARGIN = 1;
-constexpr std::size_t TOC_TOP_MARGIN = 1;
-constexpr std::size_t TOC_MIN_WIDTH = 12;
-constexpr std::size_t TOC_MAX_WIDTH = 40;
-constexpr std::size_t TOC_MIN_CONTENT_WIDTH = 40;
-constexpr int TOC_MIN_TERMINAL_COLUMNS = 70;
-
 //! Remove ANSI escape sequences and carriage returns from heading text.
 std::string PlainHeadingText(const std::string &text) {
 	std::string result;
@@ -393,32 +351,8 @@ std::string PlainHeadingText(const std::string &text) {
 	return result;
 }
 
-//! Index of the outline entry for the section at the top of the viewport.
-std::size_t TocActiveIndex(const PagerPage &page, std::size_t scroll) {
-	if (page.toc.empty()) {
-		return 0;
-	}
-	std::size_t active = 0;
-	for (std::size_t i = 0; i < page.toc.size(); i++) {
-		if (page.toc[i].line > scroll + 1) {
-			break;
-		}
-		active = i;
-	}
-	return active;
-}
-
-//! First outline entry that fits into `rows`, keeping the active entry visible.
-std::size_t TocFirstVisible(const PagerPage &page, std::size_t active, std::size_t rows) {
-	if (page.toc.size() <= rows) {
-		return 0;
-	}
-	auto first = active > rows / 2 ? active - rows / 2 : 0;
-	return std::min(first, page.toc.size() - rows);
-}
-
-std::string MakeTocLine(const PagerPage::TocEntry &entry, bool active, bool color) {
-	auto line = entry.text;
+std::string MakeTocLine(const std::string &text, bool active, bool color) {
+	auto line = text;
 	if (color) {
 		if (active) {
 			line = std::string("\x1b[1;7m") + line + RESET;
@@ -678,26 +612,22 @@ private:
 
 class PagerScreen {
 public:
-	explicit PagerScreen(bool mouse = false) : mouse_(mouse) {
+	explicit PagerScreen(bool mouse = false) {
 		// Always take over the whole terminal: enter the alternate screen,
 		// hide the cursor and start from a blank page.
 		std::cout << "\x1b[?1049h\x1b[?25l\x1b[H\x1b[2J";
-		if (mouse_) {
-			// Report button presses and releases with SGR coordinates.
-			std::cout << "\x1b[?1000h\x1b[?1006h";
+		if (mouse) {
+			SetMouseCapture(true);
 		}
 		std::cout << std::flush;
 	}
 
 	~PagerScreen() {
-		if (mouse_) {
-			std::cout << "\x1b[?1006l\x1b[?1000l";
-		}
+		SetMouseCapture(false);
 		std::cout << "\x1b[?25h\x1b[?1049l" << std::flush;
 	}
 
 private:
-	bool mouse_ = false;
 };
 
 bool WaitForInput(int milliseconds) {
@@ -834,59 +764,6 @@ int ReadKey() {
 	return 0;
 }
 
-//! Visible bytes of a rendered line plus the byte offset each one has in the
-//! original string. ANSI escape sequences are skipped so searches only ever
-//! match what the user can see.
-struct PlainLine {
-	std::string text;
-	std::vector<std::size_t> offsets;
-};
-
-PlainLine MakePlainLine(const std::string &line) {
-	PlainLine plain;
-	plain.offsets.reserve(line.size());
-	std::size_t position = 0;
-	while (position < line.size()) {
-		auto byte = static_cast<unsigned char>(line[position]);
-		if (byte == 0x1b) {
-			position++;
-			if (position < line.size() && line[position] == '[') {
-				position++;
-				while (position < line.size()) {
-					auto end = static_cast<unsigned char>(line[position++]);
-					if (end >= 0x40 && end <= 0x7e) {
-						break;
-					}
-				}
-			} else if (position < line.size() && line[position] == ']') {
-				position++;
-				while (position < line.size()) {
-					if (line[position] == '\x07') {
-						position++;
-						break;
-					}
-					if (line[position] == '\x1b' && position + 1 < line.size() && line[position + 1] == '\\') {
-						position += 2;
-						break;
-					}
-					position++;
-				}
-			} else if (position < line.size()) {
-				position++;
-			}
-			continue;
-		}
-		if (byte == '\r') {
-			position++;
-			continue;
-		}
-		plain.text.push_back(line[position]);
-		plain.offsets.push_back(position);
-		position++;
-	}
-	return plain;
-}
-
 char LowerAsciiChar(char c) {
 	if (c >= 'A' && c <= 'Z') {
 		return static_cast<char>(c - 'A' + 'a');
@@ -991,7 +868,7 @@ std::string MakeStatus(std::size_t index, std::size_t total, std::size_t top, st
                        bool answer = false) {
 	std::string status;
 	if (!internal) {
-		status += "Result " + std::to_string(index + 1) + "/" + std::to_string(total);
+		status += " Result " + std::to_string(index + 1) + "/" + std::to_string(total);
 	}
 	if (count > 0) {
 		auto last = std::min(count, top + visible);
@@ -1009,14 +886,14 @@ std::string MakeStatus(std::size_t index, std::size_t total, std::size_t top, st
 	status += "  |  / Find-in-page";
 	status += "  |  Up/Down scroll";
 	if (!internal) {
-		status += "  |  Left/Right result";
+		status += "  |  Left/Right prev,next";
 	} else if (answer) {
 		status += "  |  Left/Right link  |  Enter restart  |  Esc quit";
 	} else {
 		status += "  |  Left/Right link  |  Enter/Esc back";
 	}
-	status += "  |  q quit";
 	auto limit = static_cast<std::size_t>(std::max(columns - 1, 1));
+	status += "  |  q Quit";
 	if (status.size() > limit) {
 		status.resize(limit);
 	}
@@ -1026,7 +903,8 @@ std::string MakeStatus(std::size_t index, std::size_t total, std::size_t top, st
 void Draw(const std::vector<PagerPage> &pages, std::size_t index, std::size_t &scroll, bool color,
           const std::string &page_query = std::string(), bool internal = false,
           const std::string &custom_status = std::string(), std::size_t selected_line = std::size_t(-1),
-          const cli::TextLink *selected_link = nullptr, bool answer = false) {
+          const cli::TextLink *selected_link = nullptr, bool answer = false,
+          std::size_t selected_toc = std::size_t(-1), const TextSelection *selection = nullptr) {
 	auto size = GetTerminalSize();
 	int rows = std::max(size.rows, 3);
 	int columns = std::max(size.columns, 20);
@@ -1053,26 +931,32 @@ void Draw(const std::vector<PagerPage> &pages, std::size_t index, std::size_t &s
 	bool show_toc = page.toc_width > 0 && !page.toc.empty();
 	std::size_t toc_rows = show_toc && available > TOC_TOP_MARGIN ? available - TOC_TOP_MARGIN : 0;
 	std::size_t toc_active = show_toc ? TocActiveIndex(page, scroll) : 0;
+	if (show_toc && selected_toc < page.toc.size()) {
+		// Keep the entry the user clicked highlighted, even when the scroll
+		// was clamped to the last screenful of the page.
+		toc_active = selected_toc;
+	}
 	std::size_t toc_first = toc_rows > 0 ? TocFirstVisible(page, toc_active, toc_rows) : 0;
 	for (std::size_t row = 0; row < available; row++) {
 		if (scroll + row < page.content.size()) {
 			auto &line = page.content[scroll + row];
+			std::string rendered = line;
 			if (selected_link && scroll + row == selected_line) {
 				auto plain = MakePlainLine(line);
 				auto start = std::min(selected_link->start, plain.offsets.size());
 				auto end = std::min(selected_link->end, plain.offsets.size());
 				if (end > start) {
-					output += HighlightPlainMatches(line, plain, {{start, end}});
-				} else {
-					output += line;
+					rendered = HighlightPlainMatches(line, plain, {{start, end}});
 				}
 			} else if (color && !page_query.empty()) {
 				auto plain = MakePlainLine(line);
 				auto matches = FindPlainMatches(plain.text, page_query);
-				output += HighlightPlainMatches(line, plain, matches);
-			} else {
-				output += line;
+				rendered = HighlightPlainMatches(line, plain, matches);
 			}
+			if (selection) {
+				rendered = HighlightSelection(rendered, *selection, scroll + row, page.content_width);
+			}
+			output += rendered;
 		}
 		if (show_toc && row >= TOC_TOP_MARGIN && toc_rows > 0) {
 			auto has_line = scroll + row < page.content.size();
@@ -1083,8 +967,9 @@ void Draw(const std::vector<PagerPage> &pages, std::size_t index, std::size_t &s
 			output.append(TOC_GAP, ' ');
 			auto toc_index = toc_first + row - TOC_TOP_MARGIN;
 			if (toc_index < page.toc.size()) {
-				auto toc_line = MakeTocLine(page.toc[toc_index], toc_index == toc_active, color);
-				output += TruncatePlain(toc_line, page.toc_width);
+				auto toc_text = TruncatePlain(page.toc[toc_index].text, page.toc_width);
+				auto toc_line = MakeTocLine(toc_text, toc_index == toc_active, color);
+				output += toc_line;
 			}
 		}
 		output += "\x1b[K\n";
@@ -1491,7 +1376,7 @@ QueryEdit EditQuery(const char *label, SearchFunction search, idx_t limit, const
 			if (key < 0) {
 				break;
 			}
-			if (key == 3 || key == 4 || key == 27) {
+			if (key == 4 || key == 27) {
 				break;
 			}
 			if (key == KEY_MOUSE) {
@@ -1669,7 +1554,11 @@ bool RunInternalPage(const char *label, const SearchResult &result, bool color, 
 	std::size_t selected_link = std::size_t(-1);
 	std::size_t scroll = 0;
 	std::string page_query;
-	Draw(pages, 0, scroll, color, page_query, true, std::string(), std::size_t(-1), nullptr, regenerate != nullptr);
+	std::size_t selected_toc = std::size_t(-1);
+	std::size_t selected_toc_scroll = 0;
+	PagerMouseState mouse;
+	Draw(pages, 0, scroll, color, page_query, true, std::string(), std::size_t(-1), nullptr, regenerate != nullptr,
+	     std::size_t(-1), &mouse.selection);
 
 	auto open_link = [&](const cli::TextLink &link) -> bool {
 		SearchResult target;
@@ -1692,10 +1581,33 @@ bool RunInternalPage(const char *label, const SearchResult &result, bool color, 
 		auto visible = std::min(page.content.size(), available);
 		auto max_scroll = page.content.size() > visible ? page.content.size() - visible : 0;
 
+		// The internal page has no result tabs, so the tab-related outputs of
+		// HandlePagerClick are unused. Keep scratch values for its signature.
+		std::size_t click_index = 0;
+		bool click_edit_query = false;
+		std::size_t click_resume_index = 0;
+
+		auto apply_click = [&](const PagerClick &click) -> bool {
+			switch (click.action) {
+			case PagerClickAction::Quit:
+				return true;
+			case PagerClickAction::OpenLink:
+				return open_link(click.link);
+			case PagerClickAction::Redraw:
+				redraw = true;
+				break;
+			case PagerClickAction::EditQuery:
+				break;
+			case PagerClickAction::None:
+				redraw = false;
+				break;
+			}
+			return false;
+		};
+
 		switch (key) {
 		case 'q':
 		case 'Q':
-		case 3:
 			return true;
 		case 27:
 			if (selected_link < links.size()) {
@@ -1827,51 +1739,42 @@ bool RunInternalPage(const char *label, const SearchResult &result, bool color, 
 			}
 			break;
 		case KEY_MOUSE: {
-			if (!g_mouse_event.press || (g_mouse_event.button & 3) != 0 ||
-			    (g_mouse_event.button & (32 | 64)) != 0) {
-				redraw = false;
+			PagerMouseContext context;
+			context.header_rows = header_rows;
+			context.available = available;
+			context.scroll = scroll;
+			context.content_rows = page.content.size();
+			context.content_width = page.content_width;
+			context.has_toc = page.toc_width > 0 && !page.toc.empty();
+			context.toc_column = page.toc_column;
+			context.toc_top_margin = TOC_TOP_MARGIN;
+			auto mouse_result = HandlePagerMouse(context, mouse, g_mouse_event);
+			switch (mouse_result.action) {
+			case PagerMouseAction::Copy: {
+				auto text = SelectionText(page.content, page.content_width, mouse.selection);
+				if (!text.empty()) {
+					SetClipboard(text);
+				}
+				redraw = true;
 				break;
 			}
-			auto row = g_mouse_event.row;
-			auto column = static_cast<std::size_t>(std::max(g_mouse_event.column, 0));
-			if (row == 0) {
-				// The Back label in the first header line.
-				return false;
-			}
-			auto content_row = row - header_rows;
-			if (content_row < 0 || static_cast<std::size_t>(content_row) >= available) {
-				redraw = false;
+			case PagerMouseAction::Redraw:
+				redraw = true;
 				break;
-			}
-			auto toc_rows = available > TOC_TOP_MARGIN ? available - TOC_TOP_MARGIN : 0;
-			if (toc_rows > 0 && page.toc_width > 0 && !page.toc.empty() && column >= page.toc_column &&
-			    static_cast<std::size_t>(column) < page.toc_column + page.toc_width &&
-			    static_cast<std::size_t>(content_row) >= TOC_TOP_MARGIN) {
-				auto active = TocActiveIndex(page, scroll);
-				auto first = TocFirstVisible(page, active, toc_rows);
-				auto toc_index =
-				    first + static_cast<std::size_t>(content_row) - TOC_TOP_MARGIN;
-				if (toc_index < page.toc.size()) {
-					scroll = std::min(page.toc[toc_index].line, max_scroll);
-				} else {
-					redraw = false;
+			case PagerMouseAction::Click: {
+				auto click = HandlePagerClick(page, mouse_result.click_row, mouse_result.click_column, true,
+				                              false, header_rows, available, max_scroll, scroll, click_index,
+				                              selected_toc, selected_toc_scroll, click_edit_query,
+				                              click_resume_index);
+				if (apply_click(click)) {
+					return true;
 				}
 				break;
 			}
-			auto line = scroll + static_cast<std::size_t>(content_row);
-			bool opened = false;
-			if (line < page.content_links.size()) {
-				for (auto &link : page.content_links[line]) {
-					if (column >= link.start && column < link.end) {
-						opened = true;
-						if (open_link(link)) {
-							return true;
-						}
-						break;
-					}
-				}
+			case PagerMouseAction::None:
+				redraw = false;
+				break;
 			}
-			redraw = opened;
 			break;
 		}
 		default:
@@ -1893,8 +1796,10 @@ bool RunInternalPage(const char *label, const SearchResult &result, bool color, 
 				status = "Link " + std::to_string(selected_link + 1) + "/" + std::to_string(links.size()) + ": " +
 				         text + "  |  Enter open  |  Left/Right select  |  Esc clear";
 			}
+			auto toc_selection =
+			    selected_toc < page.toc.size() && selected_toc_scroll == scroll ? selected_toc : std::size_t(-1);
 			Draw(pages, 0, scroll, color, page_query, true, status, highlight_line, highlight,
-			     regenerate != nullptr);
+			     regenerate != nullptr, toc_selection, &mouse.selection);
 		}
 	}
 }
@@ -2018,8 +1923,21 @@ BuiltAnswerPage BuildAnswerPage(const std::string &reasoning, const std::string 
 	return built;
 }
 
-void DrawAnswerPage(const std::string &reasoning, const std::string &answer, const std::string &query, bool color,
-                    const std::string &status = "Answering  |  Esc stop  |  q quit") {
+struct AnswerDrawResult {
+	std::size_t header_rows = 0;
+	std::size_t available = 0;
+	std::size_t scroll = 0;
+	std::size_t max_scroll = 0;
+	std::size_t content_width = 0;
+	bool has_toc = false;
+	std::size_t toc_column = 0;
+	std::vector<std::string> content;
+	std::vector<std::vector<cli::TextLink>> content_links;
+};
+
+AnswerDrawResult DrawAnswerPage(const std::string &reasoning, const std::string &answer, const std::string &query,
+                                bool color, const std::string &status = "Answering  |  Esc stop  |  q Quit",
+                                const TextSelection *selection = nullptr) {
 	auto size = GetTerminalSize();
 	auto built = BuildAnswerPage(reasoning, answer, query, color, size.columns);
 	auto header_rows = built.page.header.size();
@@ -2028,9 +1946,23 @@ void DrawAnswerPage(const std::string &reasoning, const std::string &answer, con
 	std::size_t scroll = built.answer_lines > available ? built.answer_lines - available : 0;
 	auto max_scroll = built.page.content.size() > visible ? built.page.content.size() - visible : 0;
 	scroll = std::min(scroll, max_scroll);
+
+	AnswerDrawResult result;
+	result.header_rows = header_rows;
+	result.available = available;
+	result.scroll = scroll;
+	result.max_scroll = max_scroll;
+	result.content_width = built.page.content_width;
+	result.has_toc = built.page.toc_width > 0 && !built.page.toc.empty();
+	result.toc_column = built.page.toc_column;
+	result.content = built.page.content;
+	result.content_links = built.page.content_links;
+
 	std::vector<PagerPage> pages;
 	pages.push_back(std::move(built.page));
-	Draw(pages, 0, scroll, color, std::string(), true, status);
+	Draw(pages, 0, scroll, color, std::string(), true, status, std::size_t(-1), nullptr, false,
+	     std::size_t(-1), selection);
+	return result;
 }
 
 struct SplitAnswerLayout {
@@ -2139,13 +2071,18 @@ struct SplitDrawResult {
 	std::size_t header_rows = 0;
 	std::size_t available = 0;
 	std::size_t max_scroll = 0;
+	std::size_t content_width = 0;
+	bool has_toc = false;
+	std::size_t toc_column = 0;
+	std::vector<std::string> content;
 };
 
 SplitDrawResult DrawSplitAnswerPage(const char *label, const std::string &query, std::size_t query_cursor,
                                     const std::vector<SearchResult> &results, std::size_t selected, bool color,
                                     const std::string &reasoning, const std::string &answer, bool cancelled,
                                     const std::string &error, bool final, SplitAnswerView &view,
-                                    const std::string &status, const std::string &loading = std::string()) {
+                                    const std::string &status, const std::string &loading = std::string(),
+                                    const TextSelection *selection = nullptr) {
 	auto size = GetTerminalSize();
 	auto rows = std::max(size.rows, 8);
 	auto columns = std::max(size.columns, 20);
@@ -2162,9 +2099,19 @@ SplitDrawResult DrawSplitAnswerPage(const char *label, const std::string &query,
 	view.scroll = std::min(view.scroll, max_scroll);
 
 	auto content_links = std::move(built.page.content_links);
+	SplitDrawResult result;
+	result.layout = built.layout;
+	result.header_rows = header_rows;
+	result.available = available;
+	result.max_scroll = max_scroll;
+	result.content_width = built.page.content_width;
+	result.has_toc = built.page.toc_width > 0 && !built.page.toc.empty();
+	result.toc_column = built.page.toc_column;
+	result.content = built.page.content;
 	std::vector<PagerPage> pages;
 	pages.push_back(std::move(built.page));
-	Draw(pages, 0, view.scroll, color, std::string(), true, status);
+	Draw(pages, 0, view.scroll, color, std::string(), true, status, std::size_t(-1), nullptr, false,
+	     std::size_t(-1), selection);
 
 	// Keep the cursor on the query line so the prompt stays editable.
 	auto width_limit = static_cast<std::size_t>(std::max(columns - 1, 1));
@@ -2176,12 +2123,7 @@ SplitDrawResult DrawSplitAnswerPage(const char *label, const std::string &query,
 	                                           static_cast<std::size_t>(columns));
 	std::cout << "\x1b[1;" << cursor_column << "H\x1b[?25h" << std::flush;
 
-	SplitDrawResult result;
-	result.layout = built.layout;
 	result.content_links = std::move(content_links);
-	result.header_rows = header_rows;
-	result.available = available;
-	result.max_scroll = max_scroll;
 	return result;
 }
 
@@ -2225,10 +2167,11 @@ AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
 
 	SplitAnswerView view;
 	SplitDrawResult current;
+	PagerMouseState mouse;
 	bool final = false;
 	auto draw = [&](const std::string &status) {
 		current = DrawSplitAnswerPage(label, query, query_cursor, search_results, selected, color, reasoning, answer,
-		                              cancelled, error, final, view, status);
+		                              cancelled, error, final, view, status, std::string(), &mouse.selection);
 	};
 
 	auto open_link = [&](const cli::TextLink &link) {
@@ -2259,9 +2202,10 @@ AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
 	auto process_key = [&](int key, bool generating) -> bool {
 		switch (key) {
 		case 3:
-			action = AnswerAction::Quit;
-			stop = true;
-			return false;
+			if (!answer.empty() || !reasoning.empty()) {
+				SetClipboard(answer.empty() ? reasoning : answer);
+			}
+			return true;
 		case 27:
 			if (generating) {
 				cancelled = true;
@@ -2318,41 +2262,67 @@ AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
 			query_cursor = NextCodepoint(query, query_cursor);
 			return true;
 		case KEY_MOUSE: {
-			if (!g_mouse_event.press || (g_mouse_event.button & 3) != 0 ||
-			    (g_mouse_event.button & (32 | 64)) != 0) {
-				return false;
-			}
-			auto row = g_mouse_event.row;
-			auto column = static_cast<std::size_t>(std::max(g_mouse_event.column, 0));
+			PagerMouseContext context;
+			context.header_rows = static_cast<int>(current.header_rows);
+			context.available = current.available;
+			context.scroll = view.scroll;
+			context.content_rows = current.content.size();
+			context.content_width = current.content_width;
+			context.has_toc = current.has_toc;
+			context.toc_column = current.toc_column;
+			context.toc_top_margin = TOC_TOP_MARGIN;
+			auto mouse_result = HandlePagerMouse(context, mouse, g_mouse_event);
+
 			auto list_start = static_cast<int>(current.layout.list_header_start);
 			auto list_end = list_start + static_cast<int>(current.layout.list_rows);
-			if (row >= list_start && row < list_end) {
-				auto position = current.layout.first + static_cast<std::size_t>(row - list_start);
-				if (position < entry_count) {
-					selected = position;
-					if (position < search_results.size()) {
-						action = AnswerAction::OpenResult;
-						stop = true;
-					} else if (position >= quit_index) {
-						action = AnswerAction::Quit;
-						stop = true;
-					}
-					return true;
+			switch (mouse_result.action) {
+			case PagerMouseAction::Copy: {
+				auto text = SelectionText(current.content, current.content_width, mouse.selection);
+				if (!text.empty()) {
+					SetClipboard(text);
 				}
-				return false;
+				return true;
 			}
-			auto content_row = row - static_cast<int>(current.header_rows);
-			if (content_row < 0 || static_cast<std::size_t>(content_row) >= current.available) {
-				return false;
-			}
-			auto line = view.scroll + static_cast<std::size_t>(content_row);
-			if (line < current.content_links.size()) {
-				for (auto &link : current.content_links[line]) {
-					if (column >= link.start && column < link.end) {
-						open_link(link);
+			case PagerMouseAction::Redraw:
+				if (mouse.selection.dragging) {
+					// Stop following the tail while the user is selecting text.
+					view.follow_tail = false;
+				}
+				return true;
+			case PagerMouseAction::Click: {
+				if (mouse_result.click_row >= list_start && mouse_result.click_row < list_end) {
+					auto position = current.layout.first +
+					                static_cast<std::size_t>(mouse_result.click_row - list_start);
+					if (position < entry_count) {
+						selected = position;
+						if (position < search_results.size()) {
+							action = AnswerAction::OpenResult;
+							stop = true;
+						} else if (position >= quit_index) {
+							action = AnswerAction::Quit;
+							stop = true;
+						}
 						return true;
 					}
+					return false;
 				}
+				auto content_row = mouse_result.click_row - static_cast<int>(current.header_rows);
+				if (content_row >= 0 && static_cast<std::size_t>(content_row) < current.available) {
+					auto line = view.scroll + static_cast<std::size_t>(content_row);
+					if (line < current.content_links.size()) {
+						for (auto &link : current.content_links[line]) {
+							if (mouse_result.click_column >= link.start &&
+							    mouse_result.click_column < link.end) {
+								open_link(link);
+								return true;
+							}
+						}
+					}
+				}
+				return true;
+			}
+			case PagerMouseAction::None:
+				return false;
 			}
 			return false;
 		}
@@ -2402,8 +2372,8 @@ AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
 				    pending.erase(0, complete);
 			    }
 			    auto status = is_reasoning
-			                      ? "Thinking  |  Up/Down result  |  Enter restart  |  Type edit  |  Esc stop"
-			                      : "Answering  |  Up/Down result  |  Enter restart  |  Type edit  |  Esc stop";
+			                      ? " Thinking  |  Up/Down  |  Enter restart  |  Esc stop"
+			                      : "Answering  |  Up/Down  |  Enter restart  |  Esc stop";
 			    if (!handle_pending_input(status, true)) {
 				    return false;
 			    }
@@ -2459,7 +2429,7 @@ AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
 		view.follow_tail = false;
 		view.scroll = 0;
 	}
-	auto status = "Answer  |  Enter restart  |  Up/Down result  |  Type edit  |  PgUp/PgDn scroll  |  Esc quit";
+	auto status = "Answer  |  Enter restart  |  Up/Down  |  PgUp/PgDn scroll  |  Esc quit";
 	draw(status);
 	while (true) {
 		auto key = ReadKey();
@@ -2497,8 +2467,37 @@ bool ShowAnswer(const char *label, const std::string &query, const std::vector<S
 	bool quit = false;
 	bool restart = false;
 	std::string error;
+	AnswerDrawResult current;
+	PagerMouseState mouse;
 	auto draw = [&](const std::string &status) {
-		DrawAnswerPage(reasoning, answer, query, color, status);
+		current = DrawAnswerPage(reasoning, answer, query, color, status, &mouse.selection);
+	};
+
+	auto handle_mouse = [&](int key, const std::string &status) -> bool {
+		if (key != KEY_MOUSE) {
+			return false;
+		}
+		PagerMouseContext context;
+		context.header_rows = static_cast<int>(current.header_rows);
+		context.available = current.available;
+		context.scroll = current.scroll;
+		context.content_rows = current.content.size();
+		context.content_width = current.content_width;
+		context.has_toc = current.has_toc;
+		context.toc_column = current.toc_column;
+		context.toc_top_margin = TOC_TOP_MARGIN;
+		auto result = HandlePagerMouse(context, mouse, g_mouse_event);
+		if (result.action == PagerMouseAction::None) {
+			return false;
+		}
+		if (result.action == PagerMouseAction::Copy) {
+			auto text = SelectionText(current.content, current.content_width, mouse.selection);
+			if (!text.empty()) {
+				SetClipboard(text);
+			}
+		}
+		draw(status);
+		return true;
 	};
 
 	while (true) {
@@ -2529,11 +2528,23 @@ bool ShowAnswer(const char *label, const std::string &query, const std::vector<S
 					target.append(pending, 0, complete);
 					pending.erase(0, complete);
 				}
+				auto status = is_reasoning
+				                  ? " Thinking  |  Esc stop  |  Enter restart  |  q Quit"
+				                  : "Answering  |  Esc stop  |  Enter restart  |  q Quit";
 				while (WaitForInput(0)) {
 					auto key = ReadKey();
-					if (key == 27 || key == 3) {
+					if (handle_mouse(key, status)) {
+						continue;
+					}
+					if (key == 27) {
 						cancelled = true;
 						return false;
+					}
+					if (key == 3) {
+						if (!answer.empty() || !reasoning.empty()) {
+							SetClipboard(answer.empty() ? reasoning : answer);
+						}
+						continue;
 					}
 					if (key == 'q' || key == 'Q') {
 						quit = true;
@@ -2545,8 +2556,6 @@ bool ShowAnswer(const char *label, const std::string &query, const std::vector<S
 					}
 				}
 				if (complete > 0) {
-					auto status = is_reasoning ? "Thinking  |  Esc stop  |  Enter restart  |  q quit"
-					                           : "Answering  |  Esc stop  |  Enter restart  |  q quit";
 					draw(status);
 				}
 				return true;
@@ -2640,6 +2649,9 @@ int RunPager(const char *label, SearchFunction search, idx_t limit, const std::s
 			RawMode raw_mode;
 			std::vector<std::size_t> positions(current_results.size(), 0);
 			std::size_t index = std::min(current_index, current_results.size() - 1);
+			std::size_t selected_toc = std::size_t(-1);
+			std::size_t selected_toc_scroll = 0;
+			PagerMouseState mouse;
 			resume_index = index;
 			Draw(pages, index, positions[index], color, page_query);
 
@@ -2654,10 +2666,39 @@ int RunPager(const char *label, SearchFunction search, idx_t limit, const std::s
 				auto visible = std::min(page.content.size(), available);
 				auto max_scroll = page.content.size() > visible ? page.content.size() - visible : 0;
 
+				auto apply_click = [&](const PagerClick &click) -> bool {
+					switch (click.action) {
+					case PagerClickAction::Quit:
+						return true;
+					case PagerClickAction::OpenLink: {
+						SearchResult target;
+						auto url = ExternalLinkTarget(click.link.url);
+						if (!IsExternalLink(click.link.url) && LookupPageByUrl(url, target)) {
+							if (RunInternalPage(label, target, color, raw)) {
+								return true;
+							}
+							redraw = true;
+						} else {
+							OpenUrl(url);
+							redraw = false;
+						}
+						break;
+					}
+					case PagerClickAction::Redraw:
+						redraw = true;
+						break;
+					case PagerClickAction::EditQuery:
+						break;
+					case PagerClickAction::None:
+						redraw = false;
+						break;
+					}
+					return false;
+				};
+
 				switch (key) {
 				case 'q':
 				case 'Q':
-				case 3:
 					return 0;
 				case 27:
 					if (search) {
@@ -2732,6 +2773,7 @@ int RunPager(const char *label, SearchFunction search, idx_t limit, const std::s
 					} else {
 						index--;
 					}
+					selected_toc = std::size_t(-1);
 					break;
 				case 'p':
 					if (!page_query.empty()) {
@@ -2747,10 +2789,12 @@ int RunPager(const char *label, SearchFunction search, idx_t limit, const std::s
 					} else {
 						index--;
 					}
+					selected_toc = std::size_t(-1);
 					break;
 				case KEY_RIGHT:
 					// Wrap around the result tabs: last -> first.
 					index = (index + 1) % current_results.size();
+					selected_toc = std::size_t(-1);
 					break;
 				case '\r':
 				case '\n':
@@ -2760,6 +2804,7 @@ int RunPager(const char *label, SearchFunction search, idx_t limit, const std::s
 					} else {
 						index++;
 					}
+					selected_toc = std::size_t(-1);
 					break;
 				case 'n':
 					if (!page_query.empty()) {
@@ -2775,85 +2820,44 @@ int RunPager(const char *label, SearchFunction search, idx_t limit, const std::s
 					} else {
 						index++;
 					}
+					selected_toc = std::size_t(-1);
 					break;
 				case KEY_MOUSE: {
-					if (!g_mouse_event.press || (g_mouse_event.button & 3) != 0 ||
-					    (g_mouse_event.button & (32 | 64)) != 0) {
+					PagerMouseContext context;
+					context.header_rows = header_rows;
+					context.available = available;
+					context.scroll = positions[index];
+					context.content_rows = page.content.size();
+					context.content_width = page.content_width;
+					context.has_toc = page.toc_width > 0 && !page.toc.empty();
+					context.toc_column = page.toc_column;
+					context.toc_top_margin = TOC_TOP_MARGIN;
+					auto mouse_result = HandlePagerMouse(context, mouse, g_mouse_event);
+					switch (mouse_result.action) {
+					case PagerMouseAction::Copy: {
+						auto text = SelectionText(page.content, page.content_width, mouse.selection);
+						if (!text.empty()) {
+							SetClipboard(text);
+						}
+						redraw = true;
+						break;
+					}
+					case PagerMouseAction::Redraw:
+						redraw = true;
+						break;
+					case PagerMouseAction::Click: {
+						auto click = HandlePagerClick(
+						    page, mouse_result.click_row, mouse_result.click_column, false, search,
+						    header_rows, available, max_scroll, positions[index], index, selected_toc,
+						    selected_toc_scroll, edit_query, resume_index);
+						if (apply_click(click)) {
+							return 0;
+						}
+						break;
+					}
+					case PagerMouseAction::None:
 						redraw = false;
 						break;
-					}
-					auto row = g_mouse_event.row;
-					auto column = static_cast<std::size_t>(std::max(g_mouse_event.column, 0));
-					if (row == 0) {
-						bool hit = false;
-						for (auto &tab : page.tab_hits) {
-							if (column < tab.first || column >= tab.last) {
-								continue;
-							}
-							hit = true;
-							if (tab.tab == 0) {
-								if (search) {
-									edit_query = true;
-									resume_index = index;
-								} else {
-									redraw = false;
-								}
-							} else {
-								index = tab.tab - 1;
-							}
-							break;
-						}
-						if (!hit) {
-							redraw = false;
-						}
-						break;
-					}
-					// A click inside the content area opens the link under the
-					// pointer, using the same coordinates as Draw().
-					auto content_row = row - header_rows;
-					if (content_row < 0 || static_cast<std::size_t>(content_row) >= available) {
-						redraw = false;
-						break;
-					}
-					auto toc_rows = available > TOC_TOP_MARGIN ? available - TOC_TOP_MARGIN : 0;
-					if (toc_rows > 0 && page.toc_width > 0 && !page.toc.empty() &&
-					    column >= page.toc_column &&
-					    static_cast<std::size_t>(column) < page.toc_column + page.toc_width &&
-					    static_cast<std::size_t>(content_row) >= TOC_TOP_MARGIN) {
-						auto active = TocActiveIndex(page, positions[index]);
-						auto first = TocFirstVisible(page, active, toc_rows);
-						auto toc_index =
-						    first + static_cast<std::size_t>(content_row) - TOC_TOP_MARGIN;
-						if (toc_index < page.toc.size()) {
-							positions[index] = std::min(page.toc[toc_index].line, max_scroll);
-						} else {
-							redraw = false;
-						}
-						break;
-					}
-					auto line = positions[index] + static_cast<std::size_t>(content_row);
-					bool opened = false;
-					if (line < page.content_links.size()) {
-						for (auto &link : page.content_links[line]) {
-							if (column >= link.start && column < link.end) {
-								opened = true;
-								SearchResult target;
-								auto url = ExternalLinkTarget(link.url);
-								if (!IsExternalLink(link.url) && LookupPageByUrl(url, target)) {
-									if (RunInternalPage(label, target, color, raw)) {
-										return 0;
-									}
-									redraw = true;
-								} else {
-									OpenUrl(url);
-									redraw = false;
-								}
-								break;
-							}
-						}
-					}
-					if (!opened) {
-						redraw = false;
 					}
 					break;
 				}
@@ -2866,7 +2870,11 @@ int RunPager(const char *label, SearchFunction search, idx_t limit, const std::s
 					break;
 				}
 				if (redraw) {
-					Draw(pages, index, positions[index], color, page_query);
+					auto toc_selection = selected_toc < page.toc.size() && selected_toc_scroll == positions[index]
+					                         ? selected_toc
+					                         : std::size_t(-1);
+					Draw(pages, index, positions[index], color, page_query, false, std::string(), std::size_t(-1),
+					     nullptr, false, toc_selection, &mouse.selection);
 				}
 			}
 		}
@@ -2877,7 +2885,7 @@ int RunPager(const char *label, SearchFunction search, idx_t limit, const std::s
 
 		auto edit = EditQuery(label, search, limit, current_query, current_results, resume_index, color, true);
 		if (!edit.accepted) {
-			// Esc (or Ctrl-C) in the search prompt leaves the application.
+			// Esc in the search prompt leaves the application.
 			return 0;
 		}
 		current_query = edit.query;
