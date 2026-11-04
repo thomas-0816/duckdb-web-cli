@@ -112,7 +112,9 @@ add_library(docs_core STATIC
   src/generation.cpp
   src/cli/run.cpp
   src/cli/markdown.cpp
+  src/cli/clipboard.cpp
   src/cli/pager.cpp
+  src/cli/pager_answer.cpp
 )
 target_link_libraries(docs_core PUBLIC md4c llama)
 target_link_libraries(docs_core PRIVATE llama-common)
