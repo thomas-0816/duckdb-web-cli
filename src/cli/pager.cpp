@@ -1257,7 +1257,7 @@ QueryEdit EditQuery(const char *label, SearchFunction search, idx_t limit, const
 			if (key < 0) {
 				break;
 			}
-			if (key == 4 || key == 27) {
+			if (key == 3 || key == 27) {
 				break;
 			}
 			if (key == KEY_MOUSE) {
