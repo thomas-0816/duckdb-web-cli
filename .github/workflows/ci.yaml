@@ -82,6 +82,7 @@ jobs:
           - windows-2025
     env:
       VULKAN_VERSION: 1.4.357.0
+      CMAKE_GENERATOR: Ninja
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -107,8 +108,8 @@ jobs:
           # Git Bash puts its own MinGW runtime first, which does not match the
           # compiler used by the x64-windows-llvm toolchain.
           export PATH="/c/mingw64/bin:$PATH"
-          make CMAKE_FLAGS="-G Ninja"
-          make test CMAKE_FLAGS="-G Ninja"
+          make
+          make test
 
   clang-tidy:
     name: clang-tidy
