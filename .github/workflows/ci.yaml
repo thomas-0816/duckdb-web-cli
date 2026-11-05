@@ -46,8 +46,15 @@ jobs:
           persist-credentials: false
       - name: Build
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libvulkan-dev spirv-headers glslc
+          if [[ "${{ matrix.os }}" == "ubuntu-22.04" ]]; then
+            wget -qO- https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo tee /etc/apt/trusted.gpg.d/lunarg.asc
+            sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
+            sudo apt-get update
+            sudo apt-get install -y libvulkan-dev spirv-headers vulkan-sdk
+          else
+            sudo apt-get update
+            sudo apt-get install -y libvulkan-dev spirv-headers glslc
+          fi
           make
           make test
   macos:
