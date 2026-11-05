@@ -954,8 +954,6 @@ class Renderer {
 		case MD_TEXT_SOFTBR:
 			if (in_code_) {
 				WriteCode(text, size);
-			} else if (InlineContext()) {
-				AppendRaw(" ");
 			} else {
 				AppendRaw(" ");
 			}
@@ -1145,14 +1143,10 @@ class Renderer {
 			auto c = static_cast<unsigned char>(text[i]);
 			if (c == '\n') {
 				NewLine();
-			} else if (c == '\r') {
-				continue;
 			} else if (c == '\t') {
 				StartLine();
 				*sink_ += "    ";
-			} else if (c == 0x1b) {
-				continue;
-			} else if (c < 0x20 || c == 0x7f) {
+			} else if (c == '\r' || c == 0x1b || c < 0x20 || c == 0x7f) {
 				continue;
 			} else {
 				StartLine();
@@ -1166,9 +1160,7 @@ class Renderer {
 			auto c = static_cast<unsigned char>(text[i]);
 			if (c == '\n' || c == '\r' || c == '\t') {
 				sink_->push_back(' ');
-			} else if (c == 0x1b) {
-				continue;
-			} else if (c < 0x20 || c == 0x7f) {
+			} else if (c == 0x1b || c < 0x20 || c == 0x7f) {
 				continue;
 			} else {
 				sink_->push_back(static_cast<char>(c));
@@ -1263,12 +1255,12 @@ class Renderer {
 	}
 
 	void WriteSqlBlock(const std::string &text) {
-		enum class State { NORMAL,
-			               BLOCK_COMMENT,
-			               STRING,
-			               QUOTED,
-			               DOLLAR };
-		enum {
+		enum class State : std::uint8_t { NORMAL,
+			                              BLOCK_COMMENT,
+			                              STRING,
+			                              QUOTED,
+			                              DOLLAR };
+		enum : std::uint8_t {
 			COLOR_DEFAULT = 252,
 			COLOR_GUTTER = 240,
 			COLOR_KEYWORD = 81,
@@ -1469,16 +1461,14 @@ class Renderer {
 				i++;
 				while (i < size) {
 					auto d = static_cast<unsigned char>(text[i]);
-					if (std::isalnum(d) || d == '_') {
-						i++;
-					} else if (d == '.' && !(i + 1 < size && text[i + 1] == '.')) {
-						i++;
-					} else if ((d == '+' || d == '-') && i > start &&
-					           (text[i - 1] == 'e' || text[i - 1] == 'E')) {
-						i++;
-					} else {
+					bool consume = std::isalnum(d) || d == '_' ||
+					               (d == '.' && !(i + 1 < size && text[i + 1] == '.')) ||
+					               ((d == '+' || d == '-') && i > start &&
+					                (text[i - 1] == 'e' || text[i - 1] == 'E'));
+					if (!consume) {
 						break;
 					}
+					i++;
 				}
 				put_range(start, i);
 				continue;
@@ -1765,7 +1755,8 @@ class Renderer {
 				line += " ";
 				auto padded = Pad(text, widths[c], align);
 				if (row.header && color_) {
-					padded = std::string(BOLD) + padded + RESET;
+					padded.insert(0, BOLD);
+					padded += RESET;
 				}
 				line += padded;
 				line += " ";
