@@ -14,19 +14,30 @@
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
-#include <fcntl.h>
 #include <iostream>
 #include <sstream>
 #include <string>
-#include <sys/types.h>
-#include <sys/wait.h>
 #include <utility>
 #include <vector>
 
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <shellapi.h>
+#include <windows.h>
+#else
+#include <fcntl.h>
 #include <poll.h>
 #include <sys/ioctl.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
+#endif
 
 namespace docs {
 
@@ -35,15 +46,31 @@ namespace {
 //! Set from the SIGWINCH handler, so it must stay signal-safe.
 volatile sig_atomic_t g_resize_pending = 0;
 
+//! The pager screens can nest (the search prompt is opened from the pager),
+//! so only the outermost screen installs and restores the terminal state.
+int g_screen_depth = 0;
+
+#if defined(_WIN32)
+DWORD g_previous_output_mode = 0;
+bool g_output_mode_changed = false;
+TerminalSize g_last_console_size = {};
+
+bool ConsoleResized() {
+	auto size = GetTerminalSize();
+	if (size.rows == g_last_console_size.rows && size.columns == g_last_console_size.columns) {
+		return false;
+	}
+	g_last_console_size = size;
+	return true;
+}
+#else
 void HandleResizeSignal(int) {
 	g_resize_pending = 1;
 }
 
-//! The pager screens can nest (the search prompt is opened from the pager),
-//! so only the outermost screen installs and restores the handler.
-int g_screen_depth = 0;
 struct sigaction g_previous_resize_action = {};
 bool g_resize_handler_installed = false;
+#endif
 
 } // namespace
 
@@ -51,6 +78,20 @@ MouseEvent g_mouse_event;
 
 TerminalSize GetTerminalSize() {
 	TerminalSize size;
+#if defined(_WIN32)
+	CONSOLE_SCREEN_BUFFER_INFO info = {};
+	auto handle = GetStdHandle(STD_OUTPUT_HANDLE);
+	if (handle != INVALID_HANDLE_VALUE && handle != nullptr && GetConsoleScreenBufferInfo(handle, &info)) {
+		auto rows = info.srWindow.Bottom - info.srWindow.Top + 1;
+		auto columns = info.srWindow.Right - info.srWindow.Left + 1;
+		if (rows > 0) {
+			size.rows = rows;
+		}
+		if (columns > 0) {
+			size.columns = columns;
+		}
+	}
+#else
 	struct winsize window = {};
 	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &window) == 0) {
 		if (window.ws_row > 0) {
@@ -60,6 +101,7 @@ TerminalSize GetTerminalSize() {
 			size.columns = window.ws_col;
 		}
 	}
+#endif
 	return size;
 }
 
@@ -542,6 +584,10 @@ bool OpenUrl(const std::string &url) {
 		return false;
 	}
 
+#if defined(_WIN32)
+	auto result = ShellExecuteA(nullptr, "open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+	return reinterpret_cast<INT_PTR>(result) > 32;
+#else
 	auto child = fork();
 	if (child < 0) {
 		return false;
@@ -574,9 +620,20 @@ bool OpenUrl(const std::string &url) {
 	while (waitpid(child, &status, 0) < 0 && errno == EINTR) {
 	}
 	return true;
+#endif
 }
 
 RawMode::RawMode() {
+#if defined(_WIN32)
+	auto handle = GetStdHandle(STD_INPUT_HANDLE);
+	if (handle == INVALID_HANDLE_VALUE || handle == nullptr || !GetConsoleMode(handle, &original_)) {
+		return;
+	}
+	auto raw = original_;
+	raw &= ~(ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT | ENABLE_PROCESSED_INPUT | ENABLE_QUICK_EDIT_MODE);
+	raw |= ENABLE_EXTENDED_FLAGS | ENABLE_VIRTUAL_TERMINAL_INPUT;
+	active_ = SetConsoleMode(handle, raw) != 0;
+#else
 	if (tcgetattr(STDIN_FILENO, &original_) != 0) {
 		return;
 	}
@@ -586,23 +643,38 @@ RawMode::RawMode() {
 	raw.c_cc[VMIN] = 1;
 	raw.c_cc[VTIME] = 0;
 	active_ = tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == 0;
+#endif
 }
 
 RawMode::~RawMode() {
 	if (active_) {
+#if defined(_WIN32)
+		SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), original_);
+#else
 		tcsetattr(STDIN_FILENO, TCSAFLUSH, &original_);
+#endif
 	}
 }
 
 PagerScreen::PagerScreen(bool mouse) {
-	// A resize interrupts the blocking read in ReadKey, which turns it into a
-	// KEY_RESIZE event. SA_RESTART must stay off for that to work.
 	if (g_screen_depth++ == 0) {
+#if defined(_WIN32)
+		auto handle = GetStdHandle(STD_OUTPUT_HANDLE);
+		g_output_mode_changed =
+		    handle != INVALID_HANDLE_VALUE && handle != nullptr && GetConsoleMode(handle, &g_previous_output_mode);
+		if (g_output_mode_changed) {
+			SetConsoleMode(handle, g_previous_output_mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+		}
+		g_last_console_size = GetTerminalSize();
+#else
+		// A resize interrupts the blocking read in ReadKey, which turns it into a
+		// KEY_RESIZE event. SA_RESTART must stay off for that to work.
 		struct sigaction action = {};
 		action.sa_handler = HandleResizeSignal;
 		sigemptyset(&action.sa_mask);
 		action.sa_flags = 0;
 		g_resize_handler_installed = sigaction(SIGWINCH, &action, &g_previous_resize_action) == 0;
+#endif
 	}
 	// Always take over the whole terminal: enter the alternate screen,
 	// hide the cursor and start from a blank page.
@@ -616,13 +688,27 @@ PagerScreen::PagerScreen(bool mouse) {
 PagerScreen::~PagerScreen() {
 	SetMouseCapture(false);
 	std::cout << "\x1b[?25h\x1b[?1049l" << std::flush;
-	if (--g_screen_depth == 0 && g_resize_handler_installed) {
-		sigaction(SIGWINCH, &g_previous_resize_action, nullptr);
-		g_resize_handler_installed = false;
+	if (--g_screen_depth == 0) {
+#if defined(_WIN32)
+		if (g_output_mode_changed) {
+			SetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), g_previous_output_mode);
+			g_output_mode_changed = false;
+		}
+#else
+		if (g_resize_handler_installed) {
+			sigaction(SIGWINCH, &g_previous_resize_action, nullptr);
+			g_resize_handler_installed = false;
+		}
+#endif
 	}
 }
 
 bool ResizePending() {
+#if defined(_WIN32)
+	if (g_screen_depth > 0 && ConsoleResized()) {
+		g_resize_pending = 1;
+	}
+#endif
 	return g_resize_pending != 0;
 }
 
@@ -631,12 +717,32 @@ void ClearResizePending() {
 }
 
 bool WaitForInput(int milliseconds) {
+#if defined(_WIN32)
+	auto handle = GetStdHandle(STD_INPUT_HANDLE);
+	if (handle == INVALID_HANDLE_VALUE || handle == nullptr) {
+		return false;
+	}
+	auto timeout = milliseconds < 0 ? INFINITE : static_cast<DWORD>(milliseconds);
+	return WaitForSingleObject(handle, timeout) == WAIT_OBJECT_0;
+#else
 	struct pollfd descriptor = {STDIN_FILENO, POLLIN, 0};
 	return poll(&descriptor, 1, milliseconds) > 0;
+#endif
 }
 
 int ReadByte() {
 	unsigned char byte = 0;
+#if defined(_WIN32)
+	auto handle = GetStdHandle(STD_INPUT_HANDLE);
+	if (handle == INVALID_HANDLE_VALUE || handle == nullptr) {
+		return -1;
+	}
+	DWORD count = 0;
+	if (!ReadFile(handle, &byte, 1, &count, nullptr) || count != 1) {
+		return -1;
+	}
+	return byte;
+#else
 	for (;;) {
 		auto count = read(STDIN_FILENO, &byte, 1);
 		if (count == 1) {
@@ -650,16 +756,35 @@ int ReadByte() {
 		}
 		return -1;
 	}
+#endif
 }
 
 int ReadKey() {
 	// Block in poll rather than read so a resize that arrives between the
 	// pending check and the read cannot leave us waiting for the next key.
 	for (;;) {
-		if (g_resize_pending) {
+		if (ResizePending()) {
 			ClearResizePending();
 			return KEY_RESIZE;
 		}
+#if defined(_WIN32)
+		auto handle = GetStdHandle(STD_INPUT_HANDLE);
+		if (handle == INVALID_HANDLE_VALUE || handle == nullptr) {
+			return 3;
+		}
+		auto ready = WaitForSingleObject(handle, 100);
+		if (ready == WAIT_TIMEOUT) {
+			if (ResizePending()) {
+				ClearResizePending();
+				return KEY_RESIZE;
+			}
+			continue;
+		}
+		if (ready == WAIT_OBJECT_0) {
+			break;
+		}
+		return 3;
+#else
 		struct pollfd descriptor = {STDIN_FILENO, POLLIN, 0};
 		auto ready = poll(&descriptor, 1, -1);
 		if (ready < 0) {
@@ -671,6 +796,7 @@ int ReadKey() {
 		if (ready > 0) {
 			break;
 		}
+#endif
 	}
 	int key = ReadByte();
 	if (key == KEY_RESIZE) {
