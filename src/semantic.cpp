@@ -43,7 +43,7 @@ constexpr uint32_t SEMANTIC_VERSION = 1;
 constexpr const char *BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: ";
 constexpr const char *EMBEDDING_MODEL_HF_REPO = "ggml-org/bge-small-en-v1.5-Q8_0-GGUF";
 constexpr const char *EMBEDDING_MODEL_HF_FILE = "bge-small-en-v1.5-q8_0.gguf";
-constexpr const char *EMBEDDING_MODEL_ID = "bge-small-en-v1.5-q8_0";
+const SemanticModel SEMANTIC_MODEL = {"bge-small-en-v1.5-q8_0"};
 constexpr int EMBEDDING_CONTEXT_TOKENS = 512;
 constexpr int EMBEDDING_BATCH_TOKENS = 2048;
 constexpr int EMBEDDING_UBATCH_TOKENS = 2048;
@@ -657,11 +657,6 @@ Engine &GetEngine() {
 
 } // namespace
 
-const SemanticModel &GetSemanticModel() {
-	static const SemanticModel model = {EMBEDDING_MODEL_ID};
-	return model;
-}
-
 void SetSemanticProgressCallback(SemanticProgressCallback callback, void *user) {
 	progress_callback = callback;
 	progress_callback_user = user;
@@ -672,7 +667,6 @@ void EnsureSemanticIndex(const std::vector<SemanticDocument> &documents, const s
 		return;
 	}
 
-	auto &model = GetSemanticModel();
 	auto &engine = GetEngine();
 	if (!engine.embedder) {
 		engine.embedder = std::make_unique<Embedder>();
@@ -681,12 +675,13 @@ void EnsureSemanticIndex(const std::vector<SemanticDocument> &documents, const s
 	auto effective_fingerprint = fingerprint + "|model:" + ModelRevision(*engine.embedder);
 
 	auto &paths = GetDataPaths();
-	auto base = JoinPath(paths.cache_dir, "semantic-" + SanitizeModelId(model.id));
+	auto base = JoinPath(paths.cache_dir, "semantic-" + SanitizeModelId(SEMANTIC_MODEL.id));
 	auto index_path = base + ".hnsw";
 	auto meta_path = base + ".meta";
 
 	if (!engine.index || engine.fingerprint != effective_fingerprint) {
-		engine.index = LoadOrBuildIndex(model, effective_fingerprint, documents, index_path, meta_path, *engine.embedder);
+		engine.index =
+		    LoadOrBuildIndex(SEMANTIC_MODEL, effective_fingerprint, documents, index_path, meta_path, *engine.embedder);
 		engine.fingerprint = effective_fingerprint;
 	}
 }
@@ -700,11 +695,10 @@ std::vector<SemanticHit> SearchSemantic(const std::vector<SemanticDocument> &doc
 
 	EnsureSemanticIndex(documents, fingerprint);
 
-	auto &model = GetSemanticModel();
 	auto &engine = GetEngine();
 
 	auto query_text = query;
-	if (model.id.rfind("bge-small-en-v1.5", 0) == 0) {
+	if (SEMANTIC_MODEL.id.rfind("bge-small-en-v1.5", 0) == 0) {
 		query_text = BGE_QUERY_PREFIX + query;
 	}
 	std::vector<std::string> query_texts = {query_text};

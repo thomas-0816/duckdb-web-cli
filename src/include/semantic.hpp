@@ -31,8 +31,6 @@ struct SemanticModel {
 	std::string id;
 };
 
-const SemanticModel &GetSemanticModel();
-
 //! Number of model layers to offload to the GPU. Defaults to -1, which offloads
 //! every layer the active backend supports. DOCS_GPU_LAYERS overrides it.
 int GpuLayers();
