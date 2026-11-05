@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.22)
 
 # Target an older macOS release than the build machine so the resulting binary
 # runs on earlier versions. This must be set before project() to affect the
@@ -68,15 +68,8 @@ set(LLAMA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_APP OFF CACHE BOOL "" FORCE)
-if(WIN32 OR APPLE)
-  # Build the BoringSSL that llama.cpp vendors instead of relying on a system
-  # OpenSSL installation.
-  set(LLAMA_BUILD_BORINGSSL ON CACHE BOOL "" FORCE)
-  set(LLAMA_OPENSSL OFF CACHE BOOL "" FORCE)
-else()
-  set(LLAMA_BUILD_BORINGSSL OFF CACHE BOOL "" FORCE)
-  set(LLAMA_OPENSSL ON CACHE BOOL "" FORCE)
-endif()
+set(LLAMA_BUILD_BORINGSSL ON CACHE BOOL "" FORCE)
+set(LLAMA_OPENSSL OFF CACHE BOOL "" FORCE)
 set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
 
 # GPU backends: Metal on Apple, Vulkan everywhere else (Linux and Windows).
@@ -117,12 +110,9 @@ target_include_directories(md4c PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/m
 
 # Missing Markdown corpora and the answer model are downloaded at startup
 # through llama.cpp's common download helpers, the same code the llama CLI
-# uses. The common library builds cpp-httplib with HTTPS support: against the
-# system OpenSSL on Linux, and against BoringSSL on macOS and Windows.
+# uses. The common library builds cpp-httplib with HTTPS support backed by
+# BoringSSL on every platform.
 find_package(Threads REQUIRED)
-if(NOT WIN32 AND NOT APPLE)
-  find_package(OpenSSL REQUIRED)
-endif()
 
 add_library(docs_core STATIC
   src/docs_search.cpp
