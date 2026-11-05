@@ -119,6 +119,9 @@ jobs:
         shell: bash
         run: |
           set -e
+          # Git Bash puts its own MinGW runtime first, which does not match the
+          # compiler used by the x64-windows-llvm toolchain.
+          export PATH="/c/mingw64/bin:$PATH"
           make BUILD_DIR=build CMAKE_FLAGS="-G Ninja -DCMAKE_TOOLCHAIN_FILE=./third_party/llama.cpp/cmake/x64-windows-llvm.cmake -DLLAMA_BUILD_BORINGSSL=ON"
           make test BUILD_DIR=build CMAKE_FLAGS="-G Ninja -DCMAKE_TOOLCHAIN_FILE=./third_party/llama.cpp/cmake/x64-windows-llvm.cmake -DLLAMA_BUILD_BORINGSSL=ON"
 
