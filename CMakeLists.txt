@@ -84,9 +84,9 @@ set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
 # and llama.cpp falls back to the CPU backend otherwise.
 if(APPLE)
   set(GGML_METAL ON CACHE BOOL "" FORCE)
-  # Precompile the Metal library at build time instead of compiling shaders at
-  # startup; virtualized Metal devices do not always support runtime compilation.
-  set(GGML_METAL_EMBED_LIBRARY OFF CACHE BOOL "" FORCE)
+  # Embed the Metal shader sources into the binary so the executable is
+  # self-contained; they are compiled when the Metal backend starts.
+  set(GGML_METAL_EMBED_LIBRARY ON CACHE BOOL "" FORCE)
 else()
   set(GGML_VULKAN ON CACHE BOOL "" FORCE)
   if(WIN32)
@@ -168,7 +168,7 @@ set_target_properties(docs PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DI
 
 # The non-embedded Metal build writes its shader library to the llama.cpp bin
 # directory. Put it next to the docs binary, where llama.cpp looks for it.
-if(APPLE)
+if(APPLE AND NOT GGML_METAL_EMBED_LIBRARY)
   add_dependencies(docs ggml-metal-lib)
   add_custom_command(TARGET docs POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
