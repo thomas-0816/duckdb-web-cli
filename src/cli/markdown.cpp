@@ -1,6 +1,7 @@
 #include "cli/markdown.hpp"
 
 #include "md4c.h"
+#include "platform.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -13,8 +14,6 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
-
-#include <wchar.h>
 
 namespace docs {
 namespace cli {
@@ -192,7 +191,7 @@ std::size_t DisplayWidth(const std::string &text) {
 		}
 		unsigned int codepoint = 0;
 		auto length = DecodeUtf8(text, i, codepoint);
-		int cell_width = wcwidth(static_cast<wchar_t>(codepoint));
+		int cell_width = CodepointWidth(codepoint);
 		width += cell_width > 0 ? static_cast<std::size_t>(cell_width) : 1;
 		i += length;
 	}
@@ -215,7 +214,7 @@ std::string TruncateVisible(const std::string &text, std::size_t max_width, bool
 		}
 		unsigned int codepoint = 0;
 		auto length = DecodeUtf8(text, i, codepoint);
-		int cell_width = wcwidth(static_cast<wchar_t>(codepoint));
+		int cell_width = CodepointWidth(codepoint);
 		auto add = cell_width > 0 ? static_cast<std::size_t>(cell_width) : 1;
 		if (width + add + 1 > max_width) {
 			break;
@@ -1888,7 +1887,7 @@ std::vector<TextLink> ExtractLinks(const std::string &text) {
 		}
 		unsigned int codepoint = 0;
 		auto length = DecodeUtf8(text, i, codepoint);
-		int cell_width = wcwidth(static_cast<wchar_t>(codepoint));
+		int cell_width = CodepointWidth(codepoint);
 		auto add = cell_width > 0 ? static_cast<std::size_t>(cell_width) : 1;
 		if (!current_url.empty() && !current_has_text) {
 			current_start = column;
@@ -1956,7 +1955,7 @@ std::vector<std::string> WrapAnsi(const std::string &text, std::size_t width) {
 
 		unsigned int codepoint = 0;
 		auto length = DecodeUtf8(text, i, codepoint);
-		int cell_width = wcwidth(static_cast<wchar_t>(codepoint));
+		int cell_width = CodepointWidth(codepoint);
 		auto add = cell_width > 0 ? static_cast<std::size_t>(cell_width) : 1;
 		if (column > 0 && column + add > width) {
 			finish_chunk();

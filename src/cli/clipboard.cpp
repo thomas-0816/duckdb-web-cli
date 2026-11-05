@@ -1,6 +1,7 @@
 #include "cli/clipboard.hpp"
 
 #include "cli/markdown.hpp"
+#include "platform.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -57,6 +58,8 @@ std::string Base64(const std::string &input) {
 	}
 	return output;
 }
+
+} // namespace
 
 #if !defined(_WIN32)
 //! Temporarily ignore SIGPIPE while writing to a helper process that may exit
@@ -197,6 +200,8 @@ bool CopyToWindowsClipboard(const std::string &text) {
 }
 #endif
 
+namespace {
+
 struct SelectionBounds {
 	std::size_t start_row = 0;
 	std::size_t start_col = 0;
@@ -290,19 +295,7 @@ void SetClipboard(const std::string &text) {
 	std::fputc('\a', stdout);
 	std::fflush(stdout);
 
-#if defined(_WIN32)
-	CopyToWindowsClipboard(copy);
-#elif defined(__APPLE__)
-	WriteToCommand({"pbcopy"}, copy);
-#else
-	bool copied = false;
-	if (std::getenv("WAYLAND_DISPLAY")) {
-		copied = WriteToCommand({"wl-copy"}, copy);
-	}
-	if (!copied) {
-		WriteToX11(copy);
-	}
-#endif
+	CopyToSystemClipboard(copy);
 }
 
 void SetMouseCapture(bool enabled) {
