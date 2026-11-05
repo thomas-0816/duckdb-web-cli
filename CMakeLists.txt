@@ -1,5 +1,12 @@
 cmake_minimum_required(VERSION 3.16)
 
+# Target an older macOS release than the build machine so the resulting binary
+# runs on earlier versions. This must be set before project() to affect the
+# compiler and linker flags; pass -DCMAKE_OSX_DEPLOYMENT_TARGET=... to override.
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
+  set(CMAKE_OSX_DEPLOYMENT_TARGET "13.3" CACHE STRING "Minimum supported macOS version")
+endif()
+
 project(duckdb_docs_search VERSION 1.0.0 LANGUAGES C CXX ASM)
 
 set(CMAKE_C_STANDARD 99)
