@@ -30,6 +30,16 @@ extern const unsigned char docs_model_gguf_end[];
 }
 
 namespace docs {
+
+int GpuLayers() {
+	if (auto *value = std::getenv("DOCS_GPU_LAYERS")) {
+		if (*value) {
+			return std::atoi(value);
+		}
+	}
+	return -1;
+}
+
 namespace {
 
 constexpr const char *SEMANTIC_MAGIC = "DDBSEM1\n";
@@ -130,9 +140,7 @@ public:
 		}
 
 		llama_model_params model_params = llama_model_default_params();
-		// Offload every layer that the selected backend supports: Metal on
-		// Apple and Vulkan on Linux/Windows, with the CPU backend as a fallback.
-		model_params.n_gpu_layers = -1;
+		model_params.n_gpu_layers = GpuLayers();
 		// The model lives in read-only memory and has no file descriptor, so
 		// mmap and direct I/O are not available.
 		model_params.load_mode = LLAMA_LOAD_MODE_NONE;

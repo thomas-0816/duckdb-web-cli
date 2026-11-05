@@ -36,6 +36,10 @@ const SemanticModel &GetSemanticModel();
 //! True when the embedded model is available (always true for this build).
 bool SemanticModelAvailable();
 
+//! Number of model layers to offload to the GPU. Defaults to -1, which offloads
+//! every layer the active backend supports. DOCS_GPU_LAYERS overrides it.
+int GpuLayers();
+
 //! Optional callback invoked while the semantic index is being built. `done`
 //! and `total` count the chunks that have been embedded so far.
 using SemanticProgressCallback = void (*)(std::size_t done, std::size_t total, void *user);
