@@ -1,0 +1,169 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  linux:
+    name: Linux
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
+    env:
+      VERSION: ${{ github.event.release.tag_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+          persist-credentials: false
+      - name: Build and Upload
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libvulkan-dev glslc spirv-headers
+          make
+          case "${RUNNER_ARCH}" in
+            X64) arch=x64 ;;
+            ARM64) arch=arm64 ;;
+            *) echo "unsupported architecture: ${RUNNER_ARCH}" >&2; exit 1 ;;
+          esac
+          name="docs-${VERSION}-linux-${arch}"
+          mkdir -p "dist/${name}"
+          cp build/release/docs build/release/duckdb-docs.md build/release/duckdb-blog.md \
+            build/release/semantic-bge-small-en-v1.5-q8_0.hnsw \
+            build/release/semantic-bge-small-en-v1.5-q8_0.meta \
+            LICENSE README.md "dist/${name}/"
+          tar -C dist -czf "dist/${name}.tar.gz" "${name}"
+          gh release upload "${VERSION}" "dist/${name}.tar.gz" --repo "${GITHUB_REPOSITORY}" --clobber
+
+  macos:
+    name: macOS
+    runs-on: macos-15
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      DOCS_GPU_LAYERS: 0 # GitHub's macOS runners use a paravirtual Metal device, so keep inference on CPU
+      VERSION: ${{ github.event.release.tag_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+          persist-credentials: false
+      - name: Build and Upload
+        run: |
+          set -euo pipefail
+          make
+          case "${RUNNER_ARCH}" in
+            X64) arch=x64 ;;
+            ARM64) arch=arm64 ;;
+            *) echo "unsupported architecture: ${RUNNER_ARCH}" >&2; exit 1 ;;
+          esac
+          name="docs-${VERSION}-macos-${arch}"
+          mkdir -p "dist/${name}"
+          cp build/release/docs build/release/duckdb-docs.md build/release/duckdb-blog.md \
+            build/release/semantic-bge-small-en-v1.5-q8_0.hnsw \
+            build/release/semantic-bge-small-en-v1.5-q8_0.meta \
+            build/release/default.metallib LICENSE README.md "dist/${name}/"
+          tar -C dist -czf "dist/${name}.tar.gz" "${name}"
+          gh release upload "${VERSION}" "dist/${name}.tar.gz" --repo "${GITHUB_REPOSITORY}" --clobber
+
+  windows:
+    name: Windows
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-2022
+          - windows-11-arm
+    env:
+      VULKAN_VERSION: 1.4.357.0
+      CMAKE_GENERATOR: Ninja
+      VERSION: ${{ github.event.release.tag_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+          persist-credentials: false
+      - name: Install Vulkan SDK
+        shell: bash
+        run: |
+          set -e
+          if [[ "$RUNNER_ARCH" == "ARM64" ]]; then
+            sdk_os=warm
+            sdk_arch=ARM64
+          else
+            sdk_os=windows
+            sdk_arch=X64
+          fi
+          curl.exe -L -o "$RUNNER_TEMP/VulkanSDK-Installer.exe" "https://sdk.lunarg.com/sdk/download/${VULKAN_VERSION}/${sdk_os}/vulkansdk-windows-${sdk_arch}-${VULKAN_VERSION}.exe"
+          status=0
+          $RUNNER_TEMP/VulkanSDK-Installer.exe --accept-licenses --default-answer --confirm-command install || status=$?
+          if [[ $status -ne 0 && $status -ne 3010 ]]; then
+            echo "Vulkan SDK installer failed with exit code $status" >&2
+            exit "$status"
+          fi
+          echo "VULKAN_SDK=C:\\VulkanSDK\\${VULKAN_VERSION}" >> "$GITHUB_ENV"
+          echo "C:\\VulkanSDK\\${VULKAN_VERSION}\\bin" >> "$GITHUB_PATH"
+      - name: Build and Upload
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Git Bash puts its own MinGW runtime first, which does not match the
+          # compiler used by the Windows LLVM toolchain.
+          export PATH="/c/mingw64/bin:$PATH"
+          make
+          case "${RUNNER_ARCH}" in
+            X64) arch=x64 ;;
+            ARM64) arch=arm64 ;;
+            *) echo "unsupported architecture: ${RUNNER_ARCH}" >&2; exit 1 ;;
+          esac
+          name="docs-${VERSION}-windows-${arch}"
+          mkdir -p "dist/${name}"
+          cp build/release/docs.exe build/release/duckdb-docs.md build/release/duckdb-blog.md \
+            build/release/semantic-bge-small-en-v1.5-q8_0.hnsw \
+            build/release/semantic-bge-small-en-v1.5-q8_0.meta \
+            LICENSE README.md "dist/${name}/"
+          DOCS_STAGE="dist/${name}" powershell.exe -NoProfile -Command \
+            "Compress-Archive -Path \$env:DOCS_STAGE -DestinationPath (\$env:DOCS_STAGE + '.zip') -Force"
+          gh release upload "${VERSION}" "dist/${name}.zip" --repo "${GITHUB_REPOSITORY}" --clobber
+
+  clamav:
+    name: "Docker: clamAV"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    needs: [linux, macos, windows]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build container and run clamAV
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download -p "*" -D . -R "${GITHUB_REPOSITORY}"
+          ls -lisah
+          docker run --rm --entrypoint sh -v $(pwd):/app clamav/clamav:latest /app/clamdscan.sh
