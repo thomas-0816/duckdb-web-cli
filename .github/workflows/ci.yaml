@@ -74,8 +74,8 @@ jobs:
             -DLLAMA_FATAL_WARNINGS=ON
             -DGGML_METAL_SHADER_DEBUG=ON
             -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3
-            -DCMAKE_C_FLAGS_RELEASE="-O3 -DNDEBUG -g"
-            -DCMAKE_CXX_FLAGS_RELEASE="-O3 -DNDEBUG -g"
+            -DCMAKE_C_FLAGS=-g
+            -DCMAKE_CXX_FLAGS=-g
           )
           make CMAKE_FLAGS="${flags[*]}"
 
