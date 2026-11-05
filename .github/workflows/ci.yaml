@@ -69,12 +69,8 @@ jobs:
           persist-credentials: false
       - name: Build and Test
         run: |
-          flags=(
-            -DCMAKE_BUILD_RPATH="@loader_path"
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3
-          )
-          make CMAKE_FLAGS="${flags[*]}"
-          make test CMAKE_FLAGS="${flags[*]}"
+          make
+          make test
   windows:
     name: Windows
     runs-on: ${{ matrix.os }}
