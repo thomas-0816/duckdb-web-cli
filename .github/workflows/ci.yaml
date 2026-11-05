@@ -52,7 +52,7 @@ jobs:
   macos:
     name: macOS
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 15
     env:
       # GitHub's macOS runners use a paravirtual Metal device, so keep inference on the CPU.
       DOCS_GPU_LAYERS: 0
@@ -74,37 +74,9 @@ jobs:
             -DLLAMA_FATAL_WARNINGS=ON
             -DGGML_METAL_SHADER_DEBUG=ON
             -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3
-            -DCMAKE_C_FLAGS=-g
-            -DCMAKE_CXX_FLAGS=-g
           )
           make CMAKE_FLAGS="${flags[*]}"
-
-          show_crash_reports() {
-            sleep 5
-            for dir in "$HOME/Library/Logs/DiagnosticReports" "/Library/Logs/DiagnosticReports"; do
-              [[ -d "$dir" ]] || continue
-              echo "Diagnostic reports in $dir:"
-              ls -lt "$dir" | head -20
-              for report in $(ls -t "$dir"/docs* 2>/dev/null | head -3); do
-                echo "Crash report: $report"
-                cat "$report"
-              done
-            done
-          }
-
-          # Run the first query under lldb so a crash gives us a backtrace.
-          xcrun lldb --batch -o run -o "thread backtrace all" -- \
-            ./build/release/docs "how to read a parquet file" 1 > /tmp/lldb.log 2>&1 || true
-          if grep -q "stop reason = " /tmp/lldb.log; then
-            cat /tmp/lldb.log
-            show_crash_reports
-            exit 1
-          fi
-          if ! make test CMAKE_FLAGS="${flags[*]}"; then
-            cat /tmp/lldb.log
-            show_crash_reports
-            exit 1
-          fi
+          make test CMAKE_FLAGS="${flags[*]}"
   windows:
     name: Windows
     runs-on: ${{ matrix.os }}
