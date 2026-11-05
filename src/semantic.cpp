@@ -141,6 +141,13 @@ public:
 
 		llama_model_params model_params = llama_model_default_params();
 		model_params.n_gpu_layers = GpuLayers();
+		if (model_params.n_gpu_layers == 0) {
+			// Keep the model on the CPU and do not initialize a GPU backend.
+			// GitHub's macOS runners expose a paravirtual Metal device that
+			// crashes even when no layers are offloaded.
+			model_params.split_mode = LLAMA_SPLIT_MODE_NONE;
+			model_params.main_gpu = -1;
+		}
 		// The model lives in read-only memory and has no file descriptor, so
 		// mmap and direct I/O are not available.
 		model_params.load_mode = LLAMA_LOAD_MODE_NONE;
