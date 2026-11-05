@@ -42,12 +42,22 @@ in one directory. The cache is invalidated with checksums of the source files,
 so updating a Markdown file rebuilds the indexes automatically.
 Generated files can be deleted at any time.
 
+## Setup Ubuntu, Debian
+
+```bash
+apt-get update
+apt-get install libgomp1 libvulkan1 ca-certificates wget
+wget https://github.com/thomas-0816/duckdb-web-cli/releases/latest/download/duckdb-web-cli-linux-x64.tar.gz
+tar xvzf duckdb-web-cli-linux-x64.tar.gz
+duckdb-web-cli-linux-x64/docs
+```
+
 ## Using it from the DuckDB shell
 
 The DuckDB shell's `.system` command runs an external program and prints its
 output. Put the built program on `PATH`:
 
-```sh
+```bash
 export PATH="/path/to/docs-extension/build/release:$PATH"
 ```
 
