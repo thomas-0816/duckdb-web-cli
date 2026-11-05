@@ -80,6 +80,7 @@ jobs:
         os:
           - windows-2022
           - windows-2025
+          - windows-11-arm
     env:
       VULKAN_VERSION: 1.4.357.0
       CMAKE_GENERATOR: Ninja
@@ -92,7 +93,16 @@ jobs:
         shell: bash
         run: |
           set -e
-          curl.exe -L -o $RUNNER_TEMP/VulkanSDK-Installer.exe "https://sdk.lunarg.com/sdk/download/${VULKAN_VERSION}/windows/vulkansdk-windows-X64-${VULKAN_VERSION}.exe"
+          if [[ "$RUNNER_ARCH" == "ARM64" ]]; then
+            # LunarG publishes the Windows on Arm SDK under "warm".
+            sdk_os=warm
+            sdk_arch=ARM64
+          else
+            sdk_os=windows
+            sdk_arch=X64
+          fi
+          curl.exe -L -o "$RUNNER_TEMP/VulkanSDK-Installer.exe" \
+            "https://sdk.lunarg.com/sdk/download/${VULKAN_VERSION}/${sdk_os}/vulkansdk-windows-${sdk_arch}-${VULKAN_VERSION}.exe"
           status=0
           $RUNNER_TEMP/VulkanSDK-Installer.exe --accept-licenses --default-answer --confirm-command install || status=$?
           if [[ $status -ne 0 && $status -ne 3010 ]]; then
@@ -106,7 +116,7 @@ jobs:
         run: |
           set -e
           # Git Bash puts its own MinGW runtime first, which does not match the
-          # compiler used by the x64-windows-llvm toolchain.
+          # compiler used by the Windows LLVM toolchain.
           export PATH="/c/mingw64/bin:$PATH"
           make
           make test

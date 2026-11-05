@@ -10,8 +10,17 @@ endif()
 # Use the LLVM toolchain that ships with llama.cpp on native Windows builds, so
 # local builds use the same compiler as CI. A user-supplied toolchain wins.
 if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows" AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
+  # CMAKE_HOST_SYSTEM_PROCESSOR is only set after project(), so read the
+  # architecture from the environment instead. PROCESSOR_ARCHITEW6432 covers
+  # an x64 CMake running under emulation on Windows on Arm.
+  if("$ENV{PROCESSOR_ARCHITECTURE}" STREQUAL "ARM64" OR
+     "$ENV{PROCESSOR_ARCHITEW6432}" STREQUAL "ARM64")
+    set(DOCS_WINDOWS_TOOLCHAIN arm64-windows-llvm.cmake)
+  else()
+    set(DOCS_WINDOWS_TOOLCHAIN x64-windows-llvm.cmake)
+  endif()
   set(CMAKE_TOOLCHAIN_FILE
-      "${CMAKE_CURRENT_SOURCE_DIR}/third_party/llama.cpp/cmake/x64-windows-llvm.cmake"
+      "${CMAKE_CURRENT_SOURCE_DIR}/third_party/llama.cpp/cmake/${DOCS_WINDOWS_TOOLCHAIN}"
       CACHE FILEPATH "CMake toolchain file")
 endif()
 
