@@ -29,6 +29,11 @@ std::vector<SearchResult> SearchAll(const std::string &query, idx_t limit);
 //! the page title as a prefix. Used as context for answer mode.
 std::vector<SearchResult> SearchAnswerBlocks(const std::string &query, idx_t limit);
 
+//! Return one snippet per matching page, ranked exactly like `SearchAll`. Each
+//! snippet is the page's best-matching content block (at most about 1800
+//! characters) with the page title as a prefix. Used for `--snippets`.
+std::vector<SearchResult> SearchAllSnippets(const std::string &query, idx_t limit);
+
 //! Build the semantic index ahead of the first search, with a progress
 //! indicator. Called at startup so the query does not sit silently while the
 //! embeddings are computed.

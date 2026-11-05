@@ -19,6 +19,9 @@ test: release
 	$(BUILD_DIR)/docs "varchar" 1 >/dev/null
 	$(BUILD_DIR)/docs --raw "parket" 1 | grep -q "Parquet"
 	$(BUILD_DIR)/docs --raw "parket" 1 | grep -q "corrected to: parquet"
+	$(BUILD_DIR)/docs --snippets --raw "varchar" 1 | grep -q "VARCHAR"
+	# Snippets must keep the page-level ranking: result 2 is the Text Types page.
+	$(BUILD_DIR)/docs --snippets --raw "varchar" 2 | awk '/(2\/2)/ { found = 1 } found' | grep -q "Text Types"
 	# Semantic ranking may place a closely related page first (here the
 	# full-text search extension), so check that the type docs rank near the top.
 	$(BUILD_DIR)/docs --raw "varkar" 2 | grep -q "Text Types"

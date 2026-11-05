@@ -912,6 +912,8 @@ struct ScoredPage {
 	uint32_t page_id;
 	uint8_t type;
 	double score;
+	//! Index of the best-matching semantic chunk for this page.
+	std::size_t document_id;
 };
 
 struct SemanticCorpusCache {
@@ -1100,7 +1102,7 @@ SemanticCorpusCache &GetSemanticCorpusCache(const Corpus *manual, const Corpus *
 }
 
 std::vector<SearchResult> SearchSemanticCorpora(const Corpus *manual, const Corpus *blog, const std::string &query,
-                                                idx_t limit, uint8_t mode) {
+                                                idx_t limit, uint8_t mode, bool snippets) {
 	auto &cache = GetSemanticCorpusCache(manual, blog);
 	auto corrected_query = CorrectQuery(query, cache.vocabulary);
 	auto correction = corrected_query != query ? corrected_query : std::string();
@@ -1110,7 +1112,7 @@ std::vector<SearchResult> SearchSemanticCorpora(const Corpus *manual, const Corp
 	candidates = std::min<idx_t>(candidates, 2000);
 	auto hits = SearchSemantic(cache.documents, cache.fingerprint, corrected_query, candidates);
 
-	std::unordered_map<uint64_t, double> page_scores;
+	std::unordered_map<uint64_t, ScoredPage> page_scores;
 	for (auto &hit : hits) {
 		if (!wanted(hit.type)) {
 			continue;
@@ -1122,9 +1124,10 @@ std::vector<SearchResult> SearchSemanticCorpora(const Corpus *manual, const Corp
 		auto key = (static_cast<uint64_t>(hit.type) << 32) | hit.page_id;
 		auto existing = page_scores.find(key);
 		if (existing == page_scores.end()) {
-			page_scores.emplace(key, hit.score);
-		} else {
-			existing->second = std::max(existing->second, static_cast<double>(hit.score));
+			page_scores.emplace(key, ScoredPage{hit.page_id, hit.type, hit.score, hit.document_id});
+		} else if (static_cast<double>(hit.score) > existing->second.score) {
+			existing->second.score = hit.score;
+			existing->second.document_id = hit.document_id;
 		}
 	}
 
@@ -1134,14 +1137,15 @@ std::vector<SearchResult> SearchSemanticCorpora(const Corpus *manual, const Corp
 	std::vector<ScoredPage> ranked;
 	ranked.reserve(page_scores.size());
 	for (auto &entry : page_scores) {
-		auto corpus = static_cast<uint8_t>(entry.first >> 32) == 1 ? blog : manual;
+		auto type = static_cast<uint8_t>(entry.first >> 32);
 		auto page_id = static_cast<uint32_t>(entry.first & 0xffffffff);
-		auto score = entry.second;
+		auto corpus = type == 1 ? blog : manual;
+		auto score = entry.second.score;
 		if (use_keyword_boost && corpus && page_id < corpus->pages.size()) {
 			auto boost = KeywordBoost(*corpus, corpus->pages[page_id], query_terms);
 			score = std::min(1.0, score + boost);
 		}
-		ranked.push_back({page_id, static_cast<uint8_t>(entry.first >> 32), score});
+		ranked.push_back({page_id, type, score, entry.second.document_id});
 	}
 	std::sort(ranked.begin(), ranked.end(), [&](const ScoredPage &left, const ScoredPage &right) {
 		if (left.score != right.score) {
@@ -1165,8 +1169,16 @@ std::vector<SearchResult> SearchSemanticCorpora(const Corpus *manual, const Corp
 		auto &page = corpus->pages[entry.page_id];
 		auto title = entry.type == 1 ? "Blog: " + page.title : page.title;
 		auto url = "https://duckdb.org" + page.anchor;
-		results.push_back({BuildPageContent(*corpus, page), entry.score, std::move(title), correction,
-		                   std::move(url)});
+		std::string content;
+		if (snippets) {
+			if (entry.document_id >= cache.documents.size()) {
+				continue;
+			}
+			content = cache.documents[entry.document_id].text;
+		} else {
+			content = BuildPageContent(*corpus, page);
+		}
+		results.push_back({std::move(content), entry.score, std::move(title), correction, std::move(url)});
 	}
 	return results;
 }
@@ -1219,14 +1231,14 @@ std::vector<SearchResult> SearchAnswerBlocksCorpora(const Corpus *manual, const 
 //! Every query is answered by the semantic index. Blog results get a "Blog: "
 //! title prefix so they stand out in combined results.
 std::vector<SearchResult> SearchCorpora(const Corpus *manual, const Corpus *blog, const std::string &query,
-                                        idx_t limit, uint8_t mode) {
+                                        idx_t limit, uint8_t mode, bool snippets = false) {
 	if (limit == 0) {
 		return {};
 	}
 	if (!SemanticModelAvailable()) {
 		throw std::runtime_error("Semantic search is unavailable: the embedding model could not be loaded");
 	}
-	return SearchSemanticCorpora(manual, blog, query, limit, mode);
+	return SearchSemanticCorpora(manual, blog, query, limit, mode, snippets);
 }
 
 } // namespace
@@ -1278,6 +1290,18 @@ std::vector<SearchResult> SearchAnswerBlocks(const std::string &query, idx_t lim
 	auto &manual = GetManualCorpus();
 	auto &blog = GetBlogCorpus();
 	return SearchAnswerBlocksCorpora(&manual, &blog, query, limit, 2);
+}
+
+std::vector<SearchResult> SearchAllSnippets(const std::string &query, idx_t limit) {
+	if (query.empty()) {
+		return {};
+	}
+	if (!SemanticModelAvailable()) {
+		throw std::runtime_error("Semantic search is unavailable: the embedding model could not be loaded");
+	}
+	auto &manual = GetManualCorpus();
+	auto &blog = GetBlogCorpus();
+	return SearchCorpora(&manual, &blog, query, limit, 2, true);
 }
 
 void PrepareSemanticSearch(const std::string &query, bool force) {

@@ -63,6 +63,7 @@ void PrintUsage(const char *program) {
 	std::cerr << "      --no-color         Disable colors (same as --color=never)\n";
 	std::cerr << "      --raw              Print the original Markdown without rendering\n";
 	std::cerr << "      --no-ui            Print results without interactive UI\n";
+	std::cerr << "      --snippets         Print content snippets instead of complete pages (implies --no-ui)\n";
 	std::cerr << "      --llm              Answer with the local LLM instead of listing results\n";
 	std::cerr << "      --model=REPO       HuggingFace repo for LLM answer (default openbmb/MiniCPM5-1B-GGUF:Q4_K_M)\n";
 	std::cerr << "  -h, --help             Show this help\n";
@@ -281,6 +282,7 @@ int RunCli(const char *program, const SearchMode &mode, int argc, char **argv) {
 	bool limit_set = false;
 	bool raw = false;
 	bool no_pager = false;
+	bool snippets = false;
 	bool update = false;
 	bool llm = false;
 	ColorMode color_mode = ColorMode::AUTO;
@@ -347,6 +349,10 @@ int RunCli(const char *program, const SearchMode &mode, int argc, char **argv) {
 			no_pager = true;
 			continue;
 		}
+		if (argument == "--snippets") {
+			snippets = true;
+			continue;
+		}
 		if (argument == "-u" || argument == "--update") {
 			update = true;
 			continue;
@@ -392,6 +398,11 @@ int RunCli(const char *program, const SearchMode &mode, int argc, char **argv) {
 	auto query = Join(positional);
 	bool color = UseColor(color_mode);
 	auto label = mode.label;
+	auto search = snippets ? mode.snippets : mode.search;
+	if (!search) {
+		std::cerr << program << ": content snippets are unavailable for " << label << "\n";
+		return 2;
+	}
 
 	if (llm && query.empty()) {
 		std::cerr << program << ": --llm requires a query\n";
@@ -402,7 +413,7 @@ int RunCli(const char *program, const SearchMode &mode, int argc, char **argv) {
 	// partial installation may be missing them. Fetch them before any corpus is
 	// loaded so every search path sees the same complete data. --update forces
 	// both files to be fetched again, even when they already exist.
-	bool needs_corpora = query.empty() && !no_pager && isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
+	bool needs_corpora = query.empty() && !no_pager && !snippets && isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
 	if (update || !query.empty() || needs_corpora) {
 		try {
 			EnsureCorpusFiles(update);
@@ -416,17 +427,17 @@ int RunCli(const char *program, const SearchMode &mode, int argc, char **argv) {
 	}
 
 	if (query.empty()) {
-		if (!no_pager && isatty(STDIN_FILENO) && isatty(STDOUT_FILENO)) {
+		if (!no_pager && !snippets && isatty(STDIN_FILENO) && isatty(STDOUT_FILENO)) {
 			try {
 				// Load the corpora and build the caches before taking over the
 				// terminal, so errors and the first search are not delayed.
-				(void)mode.search(std::string(), 1);
+				(void)search(std::string(), 1);
 				PrepareSemanticSearch(std::string(), true);
 			} catch (const std::exception &exception) {
 				std::cerr << program << ": " << exception.what() << "\n";
 				return 1;
 			}
-			return RunLiveSearch(label, mode.search, limit, color, raw);
+			return RunLiveSearch(label, search, limit, color, raw);
 		}
 		PrintUsage(program);
 		return 2;
@@ -446,7 +457,7 @@ int RunCli(const char *program, const SearchMode &mode, int argc, char **argv) {
 
 	std::vector<SearchResult> results;
 	try {
-		results = mode.search(query, limit);
+		results = search(query, limit);
 	} catch (const std::exception &exception) {
 		std::cerr << program << ": " << exception.what() << "\n";
 		return 1;
@@ -461,9 +472,10 @@ int RunCli(const char *program, const SearchMode &mode, int argc, char **argv) {
 		return 0;
 	}
 
-	bool interactive = !no_pager && results.size() > 1 && isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
+	bool interactive =
+	    !no_pager && !snippets && results.size() > 1 && isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
 	if (interactive) {
-		return RunPager(label, mode.search, limit, query, results, color, raw, 0);
+		return RunPager(label, search, limit, query, results, color, raw, 0);
 	}
 
 	const std::string rule(78, '-');
@@ -472,15 +484,18 @@ int RunCli(const char *program, const SearchMode &mode, int argc, char **argv) {
 		std::ostringstream details;
 		details << "(" << (i + 1) << '/' << results.size() << ")";
 		auto detail_text = details.str();
+		// Each result is a page, so show its title instead of repeating the
+		// query in every header.
+		const std::string &heading = !result.title.empty() ? result.title : query;
 		if (color) {
-			std::cout << HEADER_COLOR << label << RESET << "   " << BOLD << query << RESET << "   " << DIM
+			std::cout << HEADER_COLOR << label << RESET << "   " << BOLD << heading << RESET << "   " << DIM
 			          << detail_text << RESET << "\n";
 			if (i == 0 && !result.corrected_query.empty()) {
 				std::cout << DIM << "corrected to: " << result.corrected_query << RESET << "\n\n";
 			}
 			std::cout << DIM << rule << RESET << "\n";
 		} else {
-			std::cout << label << "   " << query << "   " << detail_text << "\n";
+			std::cout << label << "   " << heading << "   " << detail_text << "\n";
 			if (i == 0 && !result.corrected_query.empty()) {
 				std::cout << "corrected to: " << result.corrected_query << "\n\n";
 			}
