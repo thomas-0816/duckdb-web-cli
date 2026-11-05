@@ -61,7 +61,7 @@ Then, from inside `duckdb`:
 ## Using it by an LLM (tool calling)
 
 ```bash
-docs --no-ui --raw "<keyword-or-question>" 1
+docs --raw --snippets "<keyword-or-question>" 1
 ```
 
 ## Usage
@@ -79,9 +79,11 @@ docs --limit 3 "how to read a parquet file"
 ```
 
 Every search covers the documentation and the blog together.
-Results are complete pages, not snippets. All sections that belong to the same
+By default, results are complete pages: all sections that belong to the same
 documentation page or blog post are grouped into a single result, and the whole
-page is rendered, including its subsections. The limit counts pages.
+page is rendered, including its subsections. The limit counts pages. Pass
+`--snippets` to return the best-matching content block of each page instead of
+complete pages.
 
 Options:
 
@@ -92,6 +94,7 @@ Options:
     --no-color         Disable colors (same as --color=never)
     --raw              Print the original Markdown without rendering
     --no-ui            Print results without interactive UI
+    --snippets         Print content snippets instead of complete pages (implies --no-ui)
     --llm              Answer with the local LLM instead of listing results
     --model=REPO       HuggingFace repo for LLM answer (default openbmb/MiniCPM5-1B-GGUF:Q4_K_M)
 -h, --help             Show this help
