@@ -1,6 +1,7 @@
 #include "semantic.hpp"
 
 #include "docs_storage.hpp"
+#include "platform.hpp"
 
 #include <hnswlib/hnswlib.h>
 #include <llama.h>
@@ -21,8 +22,6 @@
 #include <string>
 #include <system_error>
 #include <vector>
-
-#include <unistd.h>
 
 // The GGUF model is linked into the executable as a read-only data section.
 extern "C" {
@@ -139,6 +138,33 @@ public:
 		model_params.load_mode = LLAMA_LOAD_MODE_NONE;
 		model_params.lazy_mode = LLAMA_LAZY_MODE_OFF;
 
+#if defined(_WIN32)
+		// llama.cpp needs a real file on Windows, so copy the embedded bytes to
+		// a temporary file for the duration of the load.
+		std::error_code temp_error;
+		auto temp_directory = std::filesystem::temp_directory_path(temp_error);
+		if (temp_error) {
+			throw std::runtime_error("Could not locate a temporary directory for the embedding model: " +
+			                         temp_error.message());
+		}
+		auto model_path = temp_directory / ("docs-embed-" + std::to_string(ProcessId()) + ".gguf");
+		{
+			std::ofstream output(model_path, std::ios::binary | std::ios::trunc);
+			if (!output) {
+				throw std::runtime_error("Could not write the embedded embedding model");
+			}
+			output.write(reinterpret_cast<const char *>(docs_model_gguf_start),
+			             static_cast<std::streamsize>(model_size));
+			output.close();
+			if (!output) {
+				std::remove(model_path.string().c_str());
+				throw std::runtime_error("Could not write the embedded embedding model");
+			}
+		}
+		model_ = llama_model_load_from_file(model_path.string().c_str(), model_params);
+		std::error_code remove_error;
+		std::filesystem::remove(model_path, remove_error);
+#else
 		FILE *model_file =
 		    fmemopen(const_cast<unsigned char *>(docs_model_gguf_start), model_size, "rb");
 		if (!model_file) {
@@ -146,6 +172,7 @@ public:
 		}
 		model_ = llama_model_load_from_file_ptr(model_file, model_params);
 		std::fclose(model_file);
+#endif
 		if (!model_) {
 			throw std::runtime_error("Could not load the embedded embedding model");
 		}
@@ -441,7 +468,7 @@ bool ParseMetadata(const std::string &data, const SemanticModel &model, int dim,
 }
 
 void WriteFileAtomic(const std::string &path, const std::string &data) {
-	auto temporary = path + ".tmp." + std::to_string(static_cast<unsigned long>(getpid()));
+	auto temporary = path + ".tmp." + std::to_string(ProcessId());
 	{
 		std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
 		if (!output) {
@@ -507,7 +534,7 @@ struct TerminalProgress {
 };
 
 void PrintTerminalProgress(std::size_t done, std::size_t total, void *user) {
-	if (!isatty(STDERR_FILENO)) {
+	if (!IsTerminal(stderr)) {
 		return;
 	}
 	auto state = static_cast<TerminalProgress *>(user);
@@ -545,7 +572,7 @@ std::unique_ptr<SemanticIndex> BuildIndex(const SemanticModel &model, const std:
 	TerminalProgress terminal;
 	auto progress = progress_callback ? progress_callback : PrintTerminalProgress;
 	auto progress_user = progress_callback ? progress_callback_user : &terminal;
-	if (isatty(STDERR_FILENO)) {
+	if (IsTerminal(stderr)) {
 		fprintf(stderr, "docs: building semantic index for %s (%zu chunks, %d threads)...\n", model.id.c_str(),
 		        documents.size(), SemanticThreads());
 	}
@@ -566,7 +593,7 @@ std::unique_ptr<SemanticIndex> BuildIndex(const SemanticModel &model, const std:
 		                        static_cast<hnswlib::labeltype>(i));
 	}
 
-	auto temporary = index_path + ".tmp." + std::to_string(static_cast<unsigned long>(getpid()));
+	auto temporary = index_path + ".tmp." + std::to_string(ProcessId());
 	try {
 		result->index->saveIndex(temporary);
 		std::error_code error;
