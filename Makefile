@@ -1,6 +1,7 @@
 BUILD_DIR ?= build/release
 PREFIX ?= $(HOME)/.local
 CMAKE ?= cmake
+CMAKE_FLAGS ?=
 JOBS ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN)
 
 .PHONY: all release install clean test test-semantic deps
@@ -8,7 +9,7 @@ JOBS ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN)
 all: release
 
 release:
-	$(CMAKE) -S . -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+	$(CMAKE) -S . -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON $(CMAKE_FLAGS)
 	$(CMAKE) --build $(BUILD_DIR) --parallel $(JOBS)
 
 install: release

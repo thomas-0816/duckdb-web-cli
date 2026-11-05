@@ -128,16 +128,22 @@ target_include_directories(docs_core
 )
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-  target_compile_options(docs_core PRIVATE -ffunction-sections -fdata-sections)
   if(APPLE)
+    target_compile_options(docs_core PRIVATE -ffunction-sections -fdata-sections)
     set(DOCS_LINK_OPTIONS -Wl,-dead_strip)
+  elseif(WIN32 AND NOT MINGW)
+    # Clang targeting Windows uses the COFF linker, so GNU section flags do not apply.
   else()
+    target_compile_options(docs_core PRIVATE -ffunction-sections -fdata-sections)
     set(DOCS_LINK_OPTIONS -Wl,--gc-sections -s)
   endif()
 endif()
 
 add_executable(docs src/cli/docs_main.cpp)
 target_link_libraries(docs PRIVATE docs_core)
+if(WIN32)
+  target_link_libraries(docs PRIVATE shell32)
+endif()
 
 # Embed the GGUF bytes directly into the executable. An assembly .incbin keeps
 # the build fast and avoids generating a huge C array; no separate model file is
@@ -151,7 +157,11 @@ if(APPLE)
 else()
   set(DOCS_MODEL_SYMBOL_PREFIX "")
   set(DOCS_MODEL_SECTION ".rodata")
-  set(DOCS_ASM_NOTE "    .section .note.GNU-stack,\"\",@progbits\n")
+  if(WIN32)
+    set(DOCS_ASM_NOTE "")
+  else()
+    set(DOCS_ASM_NOTE "    .section .note.GNU-stack,\"\",@progbits\n")
+  endif()
 endif()
 file(WRITE ${DOCS_MODEL_ASM}
   "    .section ${DOCS_MODEL_SECTION}\n"
