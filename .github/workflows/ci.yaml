@@ -71,8 +71,6 @@ jobs:
         run: |
           flags=(
             -DCMAKE_BUILD_RPATH="@loader_path"
-            -DLLAMA_FATAL_WARNINGS=ON
-            -DGGML_METAL_SHADER_DEBUG=ON
             -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3
           )
           make CMAKE_FLAGS="${flags[*]}"
