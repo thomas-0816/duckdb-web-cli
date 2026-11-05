@@ -7,9 +7,15 @@
 #include <cstddef>
 #include <iostream>
 #include <string>
+#include <vector>
+
+#if defined(_WIN32)
+using RawModeState = unsigned long;
+#else
 #include <termios.h>
 #include <unistd.h>
-#include <vector>
+using RawModeState = struct termios;
+#endif
 
 namespace docs {
 
@@ -72,7 +78,7 @@ public:
 	RawMode &operator=(const RawMode &) = delete;
 
 private:
-	struct termios original_ = {};
+	RawModeState original_ = {};
 	bool active_ = false;
 };
 

@@ -1,4 +1,5 @@
 #include "docs_storage.hpp"
+#include "platform.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -19,7 +20,17 @@
 #include <utility>
 #include <vector>
 
-#include <unistd.h>
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
+#endif
 
 #include "download.h"
 
@@ -238,7 +249,7 @@ void WriteFileIfChanged(const std::string &path, const std::string &data) {
 	}
 	EnsureParentDirectory(path);
 
-	auto temporary = path + ".tmp." + std::to_string(static_cast<long>(getpid()));
+	auto temporary = path + ".tmp." + std::to_string(ProcessId());
 	{
 		std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
 		if (!output) {
@@ -253,9 +264,11 @@ void WriteFileIfChanged(const std::string &path, const std::string &data) {
 			throw std::runtime_error("Could not write " + temporary);
 		}
 	}
-	if (std::rename(temporary.c_str(), path.c_str()) != 0) {
+	std::error_code error;
+	std::filesystem::rename(temporary, path, error);
+	if (error) {
 		std::remove(temporary.c_str());
-		throw std::runtime_error("Could not replace " + path);
+		throw std::runtime_error("Could not replace " + path + ": " + error.message());
 	}
 }
 
@@ -270,6 +283,39 @@ std::string JoinPath(const std::string &base, const std::string &relative) {
 }
 
 std::string ExecutableDirectory() {
+#if defined(_WIN32)
+	std::vector<char> buffer(MAX_PATH);
+	while (true) {
+		auto length = GetModuleFileNameA(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+		if (length == 0) {
+			throw std::runtime_error("Could not determine the location of the docs binary");
+		}
+		if (static_cast<std::size_t>(length) < buffer.size()) {
+			std::string path(buffer.data(), static_cast<std::size_t>(length));
+			auto slash = path.find_last_of("\\/");
+			if (slash == std::string::npos) {
+				return ".";
+			}
+			return path.substr(0, slash);
+		}
+		buffer.resize(buffer.size() * 2);
+	}
+#elif defined(__APPLE__)
+	std::vector<char> buffer(4096);
+	while (true) {
+		auto size = static_cast<uint32_t>(buffer.size());
+		if (_NSGetExecutablePath(buffer.data(), &size) != 0) {
+			buffer.resize(size);
+			continue;
+		}
+		std::error_code error;
+		auto path = std::filesystem::canonical(buffer.data(), error);
+		if (error) {
+			throw std::runtime_error("Could not determine the location of the docs binary");
+		}
+		return path.parent_path().string();
+	}
+#else
 	std::vector<char> buffer(4096);
 	while (true) {
 		auto length = readlink("/proc/self/exe", buffer.data(), buffer.size() - 1);
@@ -287,6 +333,7 @@ std::string ExecutableDirectory() {
 		}
 		buffer.resize(buffer.size() * 2);
 	}
+#endif
 }
 
 std::string CacheDirectory(const std::string &binary_dir) {

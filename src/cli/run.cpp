@@ -5,6 +5,7 @@
 #include "docs_search.hpp"
 #include "docs_storage.hpp"
 #include "generation.hpp"
+#include "platform.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -16,8 +17,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-
-#include <unistd.h>
 
 namespace docs {
 namespace {
@@ -102,7 +101,7 @@ bool UseColor(ColorMode mode) {
 	if (force && *force && std::string(force) != "0") {
 		return true;
 	}
-	return isatty(STDOUT_FILENO) != 0;
+	return IsTerminal(stdout);
 }
 
 std::string Join(const std::vector<std::string> &parts) {
@@ -133,7 +132,7 @@ int RunAnswerQuery(const char *program, const char *label, const std::string &qu
 		return 1;
 	}
 
-	bool interactive = !no_pager && isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
+	bool interactive = !no_pager && IsTerminal(stdin) && IsTerminal(stdout);
 	if (interactive) {
 		try {
 			RunAnswer(label, query, blocks, color);
@@ -144,7 +143,7 @@ int RunAnswerQuery(const char *program, const char *label, const std::string &qu
 		}
 	}
 
-	auto stderr_tty = isatty(STDERR_FILENO) != 0;
+	auto stderr_tty = IsTerminal(stderr);
 	auto clear_status = [&]() {
 		if (stderr_tty) {
 			std::cerr << "\r\x1b[K";
@@ -415,7 +414,7 @@ int RunCli(const char *program, const SearchMode &mode, int argc, char **argv) {
 	// partial installation may be missing them. Fetch them before any corpus is
 	// loaded so every search path sees the same complete data. --update forces
 	// both files to be fetched again, even when they already exist.
-	bool needs_corpora = query.empty() && !no_pager && !snippets && isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
+	bool needs_corpora = query.empty() && !no_pager && !snippets && IsTerminal(stdin) && IsTerminal(stdout);
 	if (update || !query.empty() || needs_corpora) {
 		try {
 			EnsureCorpusFiles(update);
@@ -429,7 +428,7 @@ int RunCli(const char *program, const SearchMode &mode, int argc, char **argv) {
 	}
 
 	if (query.empty()) {
-		if (!no_pager && !snippets && isatty(STDIN_FILENO) && isatty(STDOUT_FILENO)) {
+		if (!no_pager && !snippets && IsTerminal(stdin) && IsTerminal(stdout)) {
 			try {
 				// Load the corpora and build the caches before taking over the
 				// terminal, so errors and the first search are not delayed.
@@ -475,7 +474,7 @@ int RunCli(const char *program, const SearchMode &mode, int argc, char **argv) {
 	}
 
 	bool interactive =
-	    !no_pager && !snippets && results.size() > 1 && isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
+	    !no_pager && !snippets && results.size() > 1 && IsTerminal(stdin) && IsTerminal(stdout);
 	if (interactive) {
 		return RunPager(label, search, limit, query, results, color, raw, 0);
 	}
