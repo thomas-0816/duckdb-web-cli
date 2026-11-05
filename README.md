@@ -516,8 +516,8 @@ program:
 ## Development
 
 ```bash
-clang-format-20 -i *.c *.cpp php_pdo_duckdb.h
-intercept-build-20 make && run-clang-tidy-20 -p . -quiet
+clang-format-20 -i src/**/*.cpp src/**/*.hpp
+intercept-build-20 make && run-clang-tidy-20 -p . -quiet -source-filter ./src/
 ```
 
 ## AI Disclosure
