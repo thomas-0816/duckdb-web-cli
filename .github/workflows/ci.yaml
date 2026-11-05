@@ -34,8 +34,6 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - ubuntu-22.04
-          - ubuntu-22.04-arm
           - ubuntu-24.04
           - ubuntu-24.04-arm
           - ubuntu-26.04
@@ -51,24 +49,65 @@ jobs:
           sudo apt-get install -y libvulkan-dev glslc spirv-headers
           make
           make test
-
   macos:
     name: macOS
-    runs-on: macos-15 # TODO add matrix with macos-26
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-15
+          - macos-26
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
           persist-credentials: false
-      - name: Build
+      - name: Build and Test
         run: |
           brew install openssl@3
           export OPENSSL_ROOT_DIR="$(brew --prefix openssl@3)"
           make
           make test
-
-# TODO add build for windows-2022 and windows-2025 with vulkan
+  windows:
+    name: Windows
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-2022
+          - windows-2025
+    env:
+      VULKAN_VERSION: 1.4.357.0
+      OPENSSL_ROOT_DIR: C:\Program Files\OpenSSL
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+          persist-credentials: false
+      - name: Install Vulkan SDK
+        shell: bash
+        run: |
+          set -e
+          curl.exe -L -o $RUNNER_TEMP/VulkanSDK-Installer.exe "https://sdk.lunarg.com/sdk/download/${VULKAN_VERSION}/windows/vulkansdk-windows-X64-${VULKAN_VERSION}.exe"
+          status=0
+          $RUNNER_TEMP/VulkanSDK-Installer.exe --accept-licenses --default-answer --confirm-command install || status=$?
+          if [[ $status -ne 0 && $status -ne 3010 ]]; then
+            echo "Vulkan SDK installer failed with exit code $status" >&2
+            exit "$status"
+          fi
+          echo "VULKAN_SDK=C:\\VulkanSDK\\${VULKAN_VERSION}" >> "$GITHUB_ENV"
+          echo "C:\\VulkanSDK\\${VULKAN_VERSION}\\bin" >> "$GITHUB_PATH"
+          echo "${OPENSSL_ROOT_DIR}\\bin" >> "$GITHUB_PATH"
+      - name: Build and Test
+        shell: bash
+        run: |
+          set -e
+          make BUILD_DIR=build CMAKE_FLAGS="-G Ninja -DCMAKE_TOOLCHAIN_FILE=./third_party/llama.cpp/cmake/x64-windows-llvm.cmake"
+          make test BUILD_DIR=build CMAKE_FLAGS="-G Ninja -DCMAKE_TOOLCHAIN_FILE=./third_party/llama.cpp/cmake/x64-windows-llvm.cmake"
 
   clang-tidy:
     name: clang-tidy
