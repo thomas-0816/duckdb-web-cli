@@ -238,8 +238,12 @@ index in a fraction of a second.
 
 The embedding model is `BAAI/bge-small-en-v1.5`. The model is downloaded into the
 HuggingFace cache when semantic search first runs. The llama.cpp submodule is linked
-statically. The only runtime dependency is the platform GPU stack: the Vulkan
-loader on Linux and Windows, and Metal on macOS.
+statically. The platform GPU stack is used when available: the Vulkan loader on
+Linux and Windows, and Metal on macOS. The Windows release archives include the
+Vulkan loader and the MSVC runtime, so they also start on a machine without the
+Vulkan SDK. Set `DOCS_GPU_LAYERS=0` to keep inference on the CPU and skip the GPU
+backend entirely; this is useful in Windows containers and on virtual machines
+that expose a GPU that cannot run inference.
 
 ## Search quality
 
@@ -399,8 +403,10 @@ binary: Vulkan on Linux and Windows, Metal on macOS. The CPU backend is still
 available, so systems without a GPU fall back automatically. On Linux the
 binary links against the Vulkan loader (`libvulkan.so.1`) and uses the installed
 driver at runtime. On x86-64 the build uses `-march=x86-64-v3`, so the resulting
-binary requires AVX2 (Haswell or newer); on ARM it targets the `armv8-a`
-baseline. The answer model and the embedding model are not part of the build.
+binary requires AVX2 (Haswell or newer); on Linux ARM it targets the `armv8-a`
+baseline, and on macOS arm64 it targets the Apple M1 baseline. Intel macOS is
+built with the same `x86-64-v3` baseline as the other x86-64 platforms. The
+answer model and the embedding model are not part of the build.
 When they are missing, they are downloaded into the Hugging Face cache on first
 use.
 
@@ -441,8 +447,10 @@ make install
 The install step copies the binary, Markdown sources and indexes into `$HOME/.local/bin`.
 Make sure that directory is on `PATH`; llama.cpp is linked statically.
 The first semantic search needs network access to download the embedding model.
-The only other runtime requirement beyond those files is the platform GPU stack.
-After that, `.system docs "..."` works directly inside the DuckDB shell.
+The platform GPU stack is used when present; the Windows archives bundle the
+Vulkan loader and the MSVC runtime, and `DOCS_GPU_LAYERS=0` forces CPU inference
+and skips the GPU backend. After that, `.system docs "..."` works directly inside
+the DuckDB shell.
 
 ## How the data is built
 

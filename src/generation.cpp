@@ -67,18 +67,6 @@ std::string AnswerModelDownloadStatus(const std::string &hf_repo) {
 	return status + "...";
 }
 
-void SilenceLlamaLog(enum ggml_log_level, const char *, void *) {
-}
-
-void EnsureLlamaBackend() {
-	static const bool initialized = [] {
-		llama_log_set(SilenceLlamaLog, nullptr);
-		llama_backend_init();
-		return true;
-	}();
-	(void)initialized;
-}
-
 std::string AnswerModelPath() {
 	// The model lives in the same Hugging Face cache that llama.cpp's
 	// downloader uses, so it is shared with the llama CLI and other tools.

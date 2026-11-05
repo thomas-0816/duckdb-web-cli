@@ -102,13 +102,19 @@ std::string SanitizeModelId(const std::string &id) {
 void SilentLlamaLog(enum ggml_log_level, const char *, void *) {
 }
 
-void EnsureLlamaBackend() {
-	static const bool initialized = [] {
-		llama_log_set(SilentLlamaLog, nullptr);
-		llama_backend_init();
-		return true;
-	}();
-	(void)initialized;
+void ConfigureLlamaBackend() {
+	// With CPU-only inference, do not initialize the GPU backend at all. This
+	// keeps the Vulkan driver out of the picture in containers and on machines
+	// that expose a virtual GPU that cannot run inference.
+	if (GpuLayers() == 0 && std::getenv("GGML_DISABLE_VULKAN") == nullptr) {
+#if defined(_WIN32)
+		_putenv_s("GGML_DISABLE_VULKAN", "1");
+#else
+		setenv("GGML_DISABLE_VULKAN", "1", 1);
+#endif
+	}
+	llama_log_set(SilentLlamaLog, nullptr);
+	llama_backend_init();
 }
 
 std::string EmbeddingModelPath() {
@@ -651,6 +657,14 @@ Engine &GetEngine() {
 }
 
 } // namespace
+
+void EnsureLlamaBackend() {
+	static const bool initialized = [] {
+		ConfigureLlamaBackend();
+		return true;
+	}();
+	(void)initialized;
+}
 
 void SetSemanticProgressCallback(SemanticProgressCallback callback, void *user) {
 	progress_callback = callback;

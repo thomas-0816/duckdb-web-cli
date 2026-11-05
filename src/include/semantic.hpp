@@ -35,6 +35,10 @@ struct SemanticModel {
 //! every layer the active backend supports. DOCS_GPU_LAYERS overrides it.
 int GpuLayers();
 
+//! Initialize llama.cpp once. When DOCS_GPU_LAYERS is 0, the GPU backend is
+//! disabled so a container or virtual GPU cannot interfere with CPU inference.
+void EnsureLlamaBackend();
+
 //! Optional callback invoked while the semantic index is being built. `done`
 //! and `total` count the chunks that have been embedded so far.
 using SemanticProgressCallback = void (*)(std::size_t done, std::size_t total, void *user);

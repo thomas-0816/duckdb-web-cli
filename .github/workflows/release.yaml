@@ -149,6 +149,39 @@ jobs:
           cp build/release/docs.exe duckdb-docs.md duckdb-blog.md LICENSE README.md \
             semantic-bge-small-en-v1.5-q8_0.hnsw semantic-bge-small-en-v1.5-q8_0.meta \
             "dist/${name}/"
+
+          # A clean Windows installation, including a Windows container, has
+          # neither the Vulkan loader nor the MSVC runtime that the executable
+          # imports. Ship both so the release starts without the Vulkan SDK or
+          # Visual Studio, and falls back to CPU inference when no GPU is
+          # available.
+          if [[ "$RUNNER_ARCH" == "ARM64" ]]; then
+            crt_arch=arm64
+          else
+            crt_arch=x64
+          fi
+          vulkan_sdk="$(cygpath -u "$VULKAN_SDK")"
+          vulkan_loader="$(find "$vulkan_sdk" -maxdepth 2 -type f -iname 'vulkan-1.dll' | sort | tail -1)"
+          if [[ -z "$vulkan_loader" ]]; then
+            echo "Vulkan loader not found under $vulkan_sdk" >&2
+            exit 1
+          fi
+          cp "$vulkan_loader" "dist/${name}/"
+
+          vswhere="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+          if [[ ! -x "$vswhere" ]]; then
+            echo "vswhere not found at $vswhere" >&2
+            exit 1
+          fi
+          vs_path="$("$vswhere" -latest -products '*' -property installationPath)"
+          vs_path="$(cygpath -u "$vs_path")"
+          crt_dir="$(find "$vs_path/VC/Redist/MSVC" -type d -path "*/${crt_arch}/Microsoft.VC*.CRT" 2>/dev/null | sort | tail -1)"
+          if [[ -z "$crt_dir" ]]; then
+            echo "MSVC runtime not found under $vs_path" >&2
+            exit 1
+          fi
+          cp "$crt_dir"/msvcp140*.dll "$crt_dir"/vcruntime140*.dll "dist/${name}/"
+
           DOCS_STAGE="dist/${name}" powershell.exe -NoProfile -Command \
             "Compress-Archive -Path \$env:DOCS_STAGE -DestinationPath (\$env:DOCS_STAGE + '.zip') -Force"
           gh release upload "${VERSION}" "dist/${name}.zip" --repo "${GITHUB_REPOSITORY}" --clobber
