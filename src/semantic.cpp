@@ -514,11 +514,37 @@ std::string ReadTextFile(const std::string &path) {
 	return data;
 }
 
-std::string ModelRevision(const Embedder &embedder) {
+std::string ModelRevision(const Embedder &embedder, const std::string &cache_path) {
+	const auto &model_path = embedder.Path();
+	std::error_code error;
+	auto size = std::filesystem::file_size(model_path, error);
+	if (error) {
+		throw std::runtime_error("Could not read " + model_path + ": " + error.message());
+	}
+	auto mtime = std::filesystem::last_write_time(model_path, error);
+	if (error) {
+		throw std::runtime_error("Could not read " + model_path + ": " + error.message());
+	}
+	auto stamp = static_cast<std::uintmax_t>(mtime.time_since_epoch().count());
+
+	// Hashing the model takes a few hundred milliseconds. Cache the result next
+	// to the index and reuse it while the model file is unchanged.
+	if (FileExists(cache_path)) {
+		std::ifstream input(cache_path, std::ios::binary);
+		std::uintmax_t cached_size = 0;
+		std::uintmax_t cached_stamp = 0;
+		std::string revision;
+		if (input >> cached_size >> cached_stamp >> revision && cached_size == size && cached_stamp == stamp) {
+			return revision;
+		}
+	}
+
 	// The prefix is historical: the shipped index was built when the model was
 	// embedded in the binary. The hash still identifies the model bytes, so the
 	// prebuilt index stays valid after switching to a download.
-	return std::string("embedded:") + Sha1HexDigest(ReadTextFile(embedder.Path()));
+	auto revision = std::string("embedded:") + Sha1HexDigest(ReadTextFile(model_path));
+	WriteFileAtomic(cache_path, std::to_string(size) + " " + std::to_string(stamp) + " " + revision + "\n");
+	return revision;
 }
 
 //===--------------------------------------------------------------------===//
@@ -645,6 +671,7 @@ std::unique_ptr<SemanticIndex> LoadOrBuildIndex(const SemanticModel &model, cons
 struct Engine {
 	std::unique_ptr<Embedder> embedder;
 	std::unique_ptr<SemanticIndex> index;
+	std::string revision;
 	std::string fingerprint;
 };
 
@@ -665,17 +692,21 @@ void EnsureSemanticIndex(const std::vector<SemanticDocument> &documents, const s
 		return;
 	}
 
-	auto &engine = GetEngine();
-	if (!engine.embedder) {
-		engine.embedder = std::make_unique<Embedder>();
-	}
-
-	auto effective_fingerprint = fingerprint + "|model:" + ModelRevision(*engine.embedder);
-
 	auto &paths = GetDataPaths();
 	auto base = JoinPath(paths.cache_dir, "semantic-" + SanitizeModelId(SEMANTIC_MODEL.id));
 	auto index_path = base + ".hnsw";
 	auto meta_path = base + ".meta";
+	auto revision_path = base + ".rev";
+
+	auto &engine = GetEngine();
+	if (!engine.embedder) {
+		engine.embedder = std::make_unique<Embedder>();
+	}
+	if (engine.revision.empty()) {
+		engine.revision = ModelRevision(*engine.embedder, revision_path);
+	}
+
+	auto effective_fingerprint = fingerprint + "|model:" + engine.revision;
 
 	if (!engine.index || engine.fingerprint != effective_fingerprint) {
 		engine.index =
