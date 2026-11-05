@@ -512,3 +512,18 @@ program:
    Blog pages are titled with a `Blog: ` prefix so they are easy to spot in
    combined results.
 7. Spelling correction handles common typos such as `parket` and `varkar`.
+
+## Development
+
+```bash
+clang-format-20 -i *.c *.cpp php_pdo_duckdb.h
+intercept-build-20 make && run-clang-tidy-20 -p . -quiet
+```
+
+## AI Disclosure
+
+The code is written by AI, tested manually.
+
+## License
+
+MIT License

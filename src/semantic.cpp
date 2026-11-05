@@ -296,7 +296,7 @@ private:
 		}
 		tokens.resize(static_cast<std::size_t>(count));
 		if (tokens.empty()) {
-			tokens.push_back(llama_vocab_cls(vocab));
+			tokens.push_back(llama_vocab_bos(vocab));
 			tokens.push_back(llama_vocab_sep(vocab));
 		}
 		if (static_cast<int>(tokens.size()) > max_length_) {
