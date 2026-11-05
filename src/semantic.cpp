@@ -41,8 +41,7 @@ namespace {
 constexpr const char *SEMANTIC_MAGIC = "DDBSEM1\n";
 constexpr uint32_t SEMANTIC_VERSION = 1;
 constexpr const char *BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: ";
-constexpr const char *EMBEDDING_MODEL_HF_REPO = "ggml-org/bge-small-en-v1.5-Q8_0-GGUF";
-constexpr const char *EMBEDDING_MODEL_HF_FILE = "bge-small-en-v1.5-q8_0.gguf";
+constexpr const char *EMBEDDING_MODEL_HF_REPO = "ggml-org/bge-small-en-v1.5-Q8_0-GGUF:Q8_0";
 const SemanticModel SEMANTIC_MODEL = {"bge-small-en-v1.5-q8_0"};
 constexpr int EMBEDDING_CONTEXT_TOKENS = 512;
 constexpr int EMBEDDING_BATCH_TOKENS = 2048;
@@ -112,7 +111,7 @@ void EnsureLlamaBackend() {
 std::string EmbeddingModelPath() {
 	// Use the Hugging Face cache that llama.cpp's downloader uses, so the model
 	// is shared with the llama CLI and other tools.
-	return common_download_resolve_path(EMBEDDING_MODEL_HF_REPO, EMBEDDING_MODEL_HF_FILE);
+	return common_download_resolve_path(EMBEDDING_MODEL_HF_REPO);
 }
 
 std::string EnsureEmbeddingModelFile() {
@@ -126,7 +125,6 @@ std::string EnsureEmbeddingModelFile() {
 
 	common_params params;
 	params.model.hf_repo = EMBEDDING_MODEL_HF_REPO;
-	params.model.hf_file = EMBEDDING_MODEL_HF_FILE;
 	try {
 		auto handler = common_models_handler_init(params, LLAMA_EXAMPLE_DOWNLOAD);
 		common_models_handler_apply(handler, params);
