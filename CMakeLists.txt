@@ -166,18 +166,6 @@ if(DOCS_LINK_OPTIONS)
 endif()
 set_target_properties(docs PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 
-# The non-embedded Metal build writes its shader library to the llama.cpp bin
-# directory. Put it next to the docs binary, where llama.cpp looks for it.
-if(APPLE AND NOT GGML_METAL_EMBED_LIBRARY)
-  add_dependencies(docs ggml-metal-lib)
-  add_custom_command(TARGET docs POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-      ${CMAKE_BINARY_DIR}/bin/default.metallib
-      $<TARGET_FILE_DIR:docs>
-    COMMENT "Copying the Metal shader library next to the docs binary"
-    VERBATIM)
-endif()
-
 # Keep the Markdown sources next to the binary so it works directly from the
 # build tree. Generated index/data files are written next to the binary as well,
 # so an installation stays self-contained.
