@@ -150,12 +150,6 @@ jobs:
             semantic-bge-small-en-v1.5-q8_0.hnsw semantic-bge-small-en-v1.5-q8_0.meta \
             "dist/${name}/"
 
-          # A clean Windows installation, including a Windows container, has
-          # neither the Vulkan loader nor the MSVC runtime that the executable
-          # imports. Ship both so the release starts without the Vulkan SDK or
-          # Visual Studio. A mismatched, older system MSVCP140.dll also crashes
-          # the executable at startup, so the bundled copy must match the
-          # compiler used for the build.
           vulkan_sdk="$(cygpath -u "$VULKAN_SDK")"
           vulkan_loader="$(find "$vulkan_sdk" -maxdepth 2 -type f -iname 'vulkan-1.dll' | sort | tail -1)"
           if [[ -z "$vulkan_loader" ]]; then
@@ -176,7 +170,7 @@ jobs:
             echo "MSVC runtime not found under $vs_path" >&2
             exit 1
           fi
-          cp "$crt_dir"/msvcp140*.dll "$crt_dir"/vcruntime140*.dll "dist/${name}/"
+          cp "$crt_dir"/msvcp140*.dll "$crt_dir"/vcruntime140*.dll "$crt_dir"/concrt140.dll "dist/${name}/"
 
           # The executable imports these directly, so a missing file would make
           # the release unusable on a clean Windows installation.
