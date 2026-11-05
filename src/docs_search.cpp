@@ -1240,9 +1240,6 @@ std::vector<SearchResult> SearchCorpora(const Corpus *manual, const Corpus *blog
 	if (limit == 0) {
 		return {};
 	}
-	if (!SemanticModelAvailable()) {
-		throw std::runtime_error("Semantic search is unavailable: the embedding model could not be loaded");
-	}
 	return SearchSemanticCorpora(manual, blog, query, limit, mode, snippets);
 }
 
@@ -1289,9 +1286,6 @@ std::vector<SearchResult> SearchAll(const std::string &query, idx_t limit) {
 }
 
 std::vector<SearchResult> SearchAnswerBlocks(const std::string &query, idx_t limit) {
-	if (!SemanticModelAvailable()) {
-		throw std::runtime_error("Semantic search is unavailable: the embedding model could not be loaded");
-	}
 	auto &manual = GetManualCorpus();
 	auto &blog = GetBlogCorpus();
 	return SearchAnswerBlocksCorpora(&manual, &blog, query, limit, 2);
@@ -1301,9 +1295,6 @@ std::vector<SearchResult> SearchAllSnippets(const std::string &query, idx_t limi
 	if (query.empty()) {
 		return {};
 	}
-	if (!SemanticModelAvailable()) {
-		throw std::runtime_error("Semantic search is unavailable: the embedding model could not be loaded");
-	}
 	auto &manual = GetManualCorpus();
 	auto &blog = GetBlogCorpus();
 	return SearchCorpora(&manual, &blog, query, limit, 2, true);
@@ -1312,9 +1303,6 @@ std::vector<SearchResult> SearchAllSnippets(const std::string &query, idx_t limi
 void PrepareSemanticSearch(const std::string &query, bool force) {
 	(void)query;
 	(void)force;
-	if (!SemanticModelAvailable()) {
-		return;
-	}
 	auto &manual = GetManualCorpus();
 	auto &blog = GetBlogCorpus();
 	auto &cache = GetSemanticCorpusCache(&manual, &blog);

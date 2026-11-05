@@ -662,10 +662,6 @@ const SemanticModel &GetSemanticModel() {
 	return model;
 }
 
-bool SemanticModelAvailable() {
-	return true;
-}
-
 void SetSemanticProgressCallback(SemanticProgressCallback callback, void *user) {
 	progress_callback = callback;
 	progress_callback_user = user;

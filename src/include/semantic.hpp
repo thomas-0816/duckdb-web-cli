@@ -33,10 +33,6 @@ struct SemanticModel {
 
 const SemanticModel &GetSemanticModel();
 
-//! True when semantic search is available. The model is downloaded on first
-//! use, so this is always true for this build.
-bool SemanticModelAvailable();
-
 //! Number of model layers to offload to the GPU. Defaults to -1, which offloads
 //! every layer the active backend supports. DOCS_GPU_LAYERS overrides it.
 int GpuLayers();
