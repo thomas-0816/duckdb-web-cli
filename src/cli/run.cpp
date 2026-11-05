@@ -28,7 +28,9 @@ constexpr const char *BOLD = "\x1b[1m";
 constexpr const char *DIM = "\x1b[2m";
 constexpr const char *HEADER_COLOR = "\x1b[1;38;5;39m";
 
-enum class ColorMode { AUTO, ALWAYS, NEVER };
+enum class ColorMode { AUTO,
+	                   ALWAYS,
+	                   NEVER };
 
 bool ParseLimit(const std::string &text, idx_t &result) {
 	if (text.empty()) {
@@ -266,7 +268,8 @@ int RunAnswerQuery(const char *program, const char *label, const std::string &qu
 	} else if (last_character != '\n') {
 		std::cout << "\n";
 	}
-	std::cout << "\n" << BuildAnswerSources(blocks);
+	std::cout << "\n"
+	          << BuildAnswerSources(blocks);
 	std::cout.flush();
 	return 0;
 }

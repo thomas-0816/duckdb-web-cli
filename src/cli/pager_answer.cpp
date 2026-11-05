@@ -809,15 +809,13 @@ bool ShowAnswer(const char *label, const std::string &query, const std::vector<S
 				if (complete > 0) {
 					draw(status);
 				}
-				return true;
-			}, [&](std::size_t done, std::size_t total) {
+				return true; }, [&](std::size_t done, std::size_t total) {
 				auto percent = total == 0 ? 100 : static_cast<int>((done * 100 + total - 1) / total);
 				constexpr std::size_t BAR_WIDTH = 20;
 				std::string bar(BAR_WIDTH, ' ');
 				std::fill_n(bar.begin(), static_cast<std::size_t>(percent) * BAR_WIDTH / 100, '#');
 				auto status = "Processing prompt [" + bar + "] " + std::to_string(percent) + "%";
-				draw(status);
-			});
+				draw(status); });
 		} catch (const std::exception &exception) {
 			error = exception.what();
 		}

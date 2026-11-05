@@ -59,7 +59,7 @@ std::string Base64(const std::string &input) {
 //! Temporarily ignore SIGPIPE while writing to a helper process that may exit
 //! before reading all of its input.
 class SigpipeGuard {
-public:
+  public:
 	SigpipeGuard() {
 		struct sigaction action = {};
 		action.sa_handler = SIG_IGN;
@@ -74,7 +74,7 @@ public:
 	SigpipeGuard(const SigpipeGuard &) = delete;
 	SigpipeGuard &operator=(const SigpipeGuard &) = delete;
 
-private:
+  private:
 	struct sigaction previous_ = {};
 	bool active_ = false;
 };
