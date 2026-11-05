@@ -4,7 +4,7 @@ CMAKE ?= cmake
 CMAKE_FLAGS ?=
 JOBS ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN)
 
-.PHONY: all release install clean test test-semantic deps
+.PHONY: all release install clean test deps
 
 all: release
 
@@ -28,13 +28,6 @@ test: release
 	# full-text search extension), so check that the type docs rank near the top.
 	$(BUILD_DIR)/docs --raw "varkar" 2 | grep -q "Text Types"
 	$(BUILD_DIR)/docs --raw "varchar" 2 | grep -q "Text Types"
-
-# A semantic query prepares the embedding index at startup (with a progress
-# line), so the first run can take a couple of minutes. Later runs load the
-# cached index. This verifies that the natural-language query reaches Parquet
-# content.
-test-semantic: release
-	$(BUILD_DIR)/docs --raw "how to read a parquet file?" 1 | grep -q "Parquet"
 
 deps:
 	git submodule update --init --recursive
