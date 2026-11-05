@@ -107,8 +107,8 @@ jobs:
           # Git Bash puts its own MinGW runtime first, which does not match the
           # compiler used by the x64-windows-llvm toolchain.
           export PATH="/c/mingw64/bin:$PATH"
-          make BUILD_DIR=build CMAKE_FLAGS="-G Ninja -DCMAKE_TOOLCHAIN_FILE=./third_party/llama.cpp/cmake/x64-windows-llvm.cmake"
-          make test BUILD_DIR=build CMAKE_FLAGS="-G Ninja -DCMAKE_TOOLCHAIN_FILE=./third_party/llama.cpp/cmake/x64-windows-llvm.cmake"
+          make BUILD_DIR=build CMAKE_FLAGS="-G Ninja"
+          make test BUILD_DIR=build CMAKE_FLAGS="-G Ninja"
 
   clang-tidy:
     name: clang-tidy

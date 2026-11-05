@@ -7,6 +7,14 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" AND NOT DEFINED CMAKE_OSX_DEPLOYMENT
   set(CMAKE_OSX_DEPLOYMENT_TARGET "13.3" CACHE STRING "Minimum supported macOS version")
 endif()
 
+# Use the LLVM toolchain that ships with llama.cpp on native Windows builds, so
+# local builds use the same compiler as CI. A user-supplied toolchain wins.
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows" AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
+  set(CMAKE_TOOLCHAIN_FILE
+      "${CMAKE_CURRENT_SOURCE_DIR}/third_party/llama.cpp/cmake/x64-windows-llvm.cmake"
+      CACHE FILEPATH "CMake toolchain file")
+endif()
+
 project(duckdb_docs_search VERSION 1.0.0 LANGUAGES C CXX ASM)
 
 set(CMAKE_C_STANDARD 99)
