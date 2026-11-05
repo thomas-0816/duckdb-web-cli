@@ -1,6 +1,8 @@
 #include "semantic.hpp"
 
+#include "arg.h"
 #include "docs_storage.hpp"
+#include "download.h"
 #include "platform.hpp"
 
 #include <hnswlib/hnswlib.h>
@@ -23,12 +25,6 @@
 #include <system_error>
 #include <vector>
 
-// The GGUF model is linked into the executable as a read-only data section.
-extern "C" {
-extern const unsigned char docs_model_gguf_start[];
-extern const unsigned char docs_model_gguf_end[];
-}
-
 namespace docs {
 
 int GpuLayers() {
@@ -45,7 +41,9 @@ namespace {
 constexpr const char *SEMANTIC_MAGIC = "DDBSEM1\n";
 constexpr uint32_t SEMANTIC_VERSION = 1;
 constexpr const char *BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: ";
-constexpr const char *EMBEDDED_MODEL_ID = "bge-small-en-v1.5-q8_0";
+constexpr const char *EMBEDDING_MODEL_HF_REPO = "ggml-org/bge-small-en-v1.5-Q8_0-GGUF";
+constexpr const char *EMBEDDING_MODEL_HF_FILE = "bge-small-en-v1.5-q8_0.gguf";
+constexpr const char *EMBEDDING_MODEL_ID = "bge-small-en-v1.5-q8_0";
 constexpr int EMBEDDING_CONTEXT_TOKENS = 512;
 constexpr int EMBEDDING_BATCH_TOKENS = 2048;
 constexpr int EMBEDDING_UBATCH_TOKENS = 2048;
@@ -71,11 +69,6 @@ struct SemanticRecord {
 bool FileExists(const std::string &path) {
 	std::error_code error;
 	return std::filesystem::exists(path, error) && !error;
-}
-
-std::size_t EmbeddedModelSize() {
-	return static_cast<std::size_t>(reinterpret_cast<std::uintptr_t>(docs_model_gguf_end) -
-	                                reinterpret_cast<std::uintptr_t>(docs_model_gguf_start));
 }
 
 std::string JoinPath(const std::string &base, const std::string &relative) {
@@ -116,6 +109,38 @@ void EnsureLlamaBackend() {
 	(void)initialized;
 }
 
+std::string EmbeddingModelPath() {
+	// Use the Hugging Face cache that llama.cpp's downloader uses, so the model
+	// is shared with the llama CLI and other tools.
+	return common_download_resolve_path(EMBEDDING_MODEL_HF_REPO, EMBEDDING_MODEL_HF_FILE);
+}
+
+std::string EnsureEmbeddingModelFile() {
+	auto path = EmbeddingModelPath();
+	if (!path.empty() && FileExists(path)) {
+		return path;
+	}
+
+	fprintf(stderr, "docs: downloading %s...\n", EMBEDDING_MODEL_HF_REPO);
+	fflush(stderr);
+
+	common_params params;
+	params.model.hf_repo = EMBEDDING_MODEL_HF_REPO;
+	params.model.hf_file = EMBEDDING_MODEL_HF_FILE;
+	try {
+		auto handler = common_models_handler_init(params, LLAMA_EXAMPLE_DOWNLOAD);
+		common_models_handler_apply(handler, params);
+	} catch (const std::exception &failure) {
+		throw std::runtime_error("Could not download " + std::string(EMBEDDING_MODEL_HF_REPO) + ": " +
+		                         failure.what());
+	}
+
+	if (params.model.path.empty() || !FileExists(params.model.path)) {
+		throw std::runtime_error("Could not download " + std::string(EMBEDDING_MODEL_HF_REPO));
+	}
+	return params.model.path;
+}
+
 void NormalizeVector(float *vector, int dim) {
 	double norm = 0;
 	for (int i = 0; i < dim; i++) {
@@ -134,10 +159,7 @@ class Embedder {
 public:
 	Embedder() {
 		EnsureLlamaBackend();
-		auto model_size = EmbeddedModelSize();
-		if (model_size == 0) {
-			throw std::runtime_error("The embedded embedding model is empty");
-		}
+		path_ = EnsureEmbeddingModelFile();
 
 		llama_model_params model_params = llama_model_default_params();
 		model_params.n_gpu_layers = GpuLayers();
@@ -148,48 +170,10 @@ public:
 			model_params.split_mode = LLAMA_SPLIT_MODE_NONE;
 			model_params.main_gpu = -1;
 		}
-		// The model lives in read-only memory and has no file descriptor, so
-		// mmap and direct I/O are not available.
-		model_params.load_mode = LLAMA_LOAD_MODE_NONE;
-		model_params.lazy_mode = LLAMA_LAZY_MODE_OFF;
 
-#if defined(_WIN32)
-		// llama.cpp needs a real file on Windows, so copy the embedded bytes to
-		// a temporary file for the duration of the load.
-		std::error_code temp_error;
-		auto temp_directory = std::filesystem::temp_directory_path(temp_error);
-		if (temp_error) {
-			throw std::runtime_error("Could not locate a temporary directory for the embedding model: " +
-			                         temp_error.message());
-		}
-		auto model_path = temp_directory / ("docs-embed-" + std::to_string(ProcessId()) + ".gguf");
-		{
-			std::ofstream output(model_path, std::ios::binary | std::ios::trunc);
-			if (!output) {
-				throw std::runtime_error("Could not write the embedded embedding model");
-			}
-			output.write(reinterpret_cast<const char *>(docs_model_gguf_start),
-			             static_cast<std::streamsize>(model_size));
-			output.close();
-			if (!output) {
-				std::remove(model_path.string().c_str());
-				throw std::runtime_error("Could not write the embedded embedding model");
-			}
-		}
-		model_ = llama_model_load_from_file(model_path.string().c_str(), model_params);
-		std::error_code remove_error;
-		std::filesystem::remove(model_path, remove_error);
-#else
-		FILE *model_file =
-		    fmemopen(const_cast<unsigned char *>(docs_model_gguf_start), model_size, "rb");
-		if (!model_file) {
-			throw std::runtime_error("Could not open the embedded embedding model");
-		}
-		model_ = llama_model_load_from_file_ptr(model_file, model_params);
-		std::fclose(model_file);
-#endif
+		model_ = llama_model_load_from_file(path_.c_str(), model_params);
 		if (!model_) {
-			throw std::runtime_error("Could not load the embedded embedding model");
+			throw std::runtime_error("Could not load the embedding model");
 		}
 
 		max_length_ = llama_model_n_ctx_train(model_);
@@ -211,7 +195,7 @@ public:
 		if (!ctx_) {
 			llama_model_free(model_);
 			model_ = nullptr;
-			throw std::runtime_error("Could not create an embedding context for the embedded model");
+			throw std::runtime_error("Could not create an embedding context for the embedding model");
 		}
 
 		dim_ = llama_model_n_embd_out(model_);
@@ -234,6 +218,10 @@ public:
 
 	int Dim() const {
 		return dim_;
+	}
+
+	const std::string &Path() const {
+		return path_;
 	}
 
 	void Embed(const std::vector<std::string> &texts, std::vector<float> &output,
@@ -349,6 +337,7 @@ private:
 		return tokens;
 	}
 
+	std::string path_;
 	llama_model *model_ = nullptr;
 	llama_context *ctx_ = nullptr;
 	int dim_ = 384;
@@ -527,9 +516,11 @@ std::string ReadTextFile(const std::string &path) {
 	return data;
 }
 
-std::string ModelRevision(const SemanticModel &model) {
-	(void)model;
-	return std::string("embedded:") + DOCS_EMBEDDED_MODEL_SHA1;
+std::string ModelRevision(const Embedder &embedder) {
+	// The prefix is historical: the shipped index was built when the model was
+	// embedded in the binary. The hash still identifies the model bytes, so the
+	// prebuilt index stays valid after switching to a download.
+	return std::string("embedded:") + Sha1HexDigest(ReadTextFile(embedder.Path()));
 }
 
 //===--------------------------------------------------------------------===//
@@ -667,12 +658,12 @@ Engine &GetEngine() {
 } // namespace
 
 const SemanticModel &GetSemanticModel() {
-	static const SemanticModel model = {EMBEDDED_MODEL_ID};
+	static const SemanticModel model = {EMBEDDING_MODEL_ID};
 	return model;
 }
 
 bool SemanticModelAvailable() {
-	return EmbeddedModelSize() > 0;
+	return true;
 }
 
 void SetSemanticProgressCallback(SemanticProgressCallback callback, void *user) {
@@ -691,7 +682,7 @@ void EnsureSemanticIndex(const std::vector<SemanticDocument> &documents, const s
 		engine.embedder = std::make_unique<Embedder>();
 	}
 
-	auto effective_fingerprint = fingerprint + "|model:" + ModelRevision(model);
+	auto effective_fingerprint = fingerprint + "|model:" + ModelRevision(*engine.embedder);
 
 	auto &paths = GetDataPaths();
 	auto base = JoinPath(paths.cache_dir, "semantic-" + SanitizeModelId(model.id));

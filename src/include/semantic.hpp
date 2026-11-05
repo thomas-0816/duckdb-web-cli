@@ -25,15 +25,16 @@ struct SemanticHit {
 	float score = 0;
 };
 
-//! The embedding model used for semantic search. The GGUF data is compiled
-//! into the binary, so no model file is needed at run time.
+//! The embedding model used for semantic search. The model is downloaded from
+//! Hugging Face on first use and cached by llama.cpp's downloader.
 struct SemanticModel {
 	std::string id;
 };
 
 const SemanticModel &GetSemanticModel();
 
-//! True when the embedded model is available (always true for this build).
+//! True when semantic search is available. The model is downloaded on first
+//! use, so this is always true for this build.
 bool SemanticModelAvailable();
 
 //! Number of model layers to offload to the GPU. Defaults to -1, which offloads

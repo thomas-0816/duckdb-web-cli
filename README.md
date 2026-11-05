@@ -25,7 +25,7 @@ A search covers the documentation and the blog together.
 The program looks for these files in its own directory:
 
 ```text
-docs                                the binary (includes the embedding model)
+docs                                the binary
 duckdb-docs.md                      documentation text
 duckdb-blog.md                      blog text
 ```
@@ -205,8 +205,9 @@ Both commands return the Parquet pages first. Short keyword queries use the same
 semantic index; there is no separate lexical ranking.
 
 The semantic index is built from the Markdown the first time it is needed. The
-embedding model is `BAAI/bge-small-en-v1.5`, embedded in the binary and loaded
-through llama.cpp. Every page is split into chunks of at most about 1800 characters,
+embedding model is `BAAI/bge-small-en-v1.5`, downloaded from
+`ggml-org/bge-small-en-v1.5-Q8_0-GGUF` into the shared Hugging Face cache on
+first use and loaded through llama.cpp. Every page is split into chunks of at most about 1800 characters,
 then embedded with the page title as context. The normalized vectors are stored
 in an HNSW index and searched with cosine similarity. Results are grouped back
 into complete pages, so several matching chunks from the same page still produce
@@ -220,7 +221,7 @@ files:
 ```
 
 The metadata records a SHA-1 fingerprint of the Markdown sources and the
-embedded model, so the index is rebuilt automatically when the documentation or
+embedding model, so the index is rebuilt automatically when the documentation or
 the model changes.
 
 The index is prepared at startup before the search runs, both for a query and
@@ -236,16 +237,11 @@ Index builds use four CPU threads and offload the model to the GPU if possible,
 which keeps the rest of the system responsive. Later searches load the saved HNSW
 index in a fraction of a second.
 
-The embedding model is `BAAI/bge-small-en-v1.5`. The model bytes are
-linked into the binary, so the release is a single self-contained executable:
-there is no model file to copy. The llama.cpp submodule is also linked
+The embedding model is `BAAI/bge-small-en-v1.5`. The model is not part of the
+build: it is downloaded into the Hugging Face cache when semantic search first
+runs, and the llama CLI shares the same cache. The llama.cpp submodule is linked
 statically. The only runtime dependency is the platform GPU stack: the Vulkan
-loader on Linux and Windows, and Metal on macOS. Refresh the embedding model if
-necessary before building:
-
-```sh
-wget https://huggingface.co/ggml-org/bge-small-en-v1.5-Q8_0-GGUF/resolve/main/bge-small-en-v1.5-q8_0.gguf
-```
+loader on Linux and Windows, and Metal on macOS.
 
 ## Search quality
 
@@ -390,7 +386,6 @@ Requirements:
 - a C99 compiler and a C++17 compiler
 - CMake 3.22 or newer
 - network access when configuring, to fetch the pinned BoringSSL used for HTTPS downloads
-- the embedding model file
 - on Linux and Windows, the Vulkan SDK (including `glslc`)
 - on macOS, the Metal toolchain that ships with Xcode
 
@@ -407,8 +402,9 @@ available, so systems without a GPU fall back automatically. On Linux the
 binary links against the Vulkan loader (`libvulkan.so.1`) and uses the installed
 driver at runtime. On x86-64 the build uses `-march=x86-64-v3`, so the resulting
 binary requires AVX2 (Haswell or newer); on ARM it targets the `armv8-a`
-baseline. The answer model is not part of the build. When it is missing, answer mode
-downloads it into the HuggingFace cache on first use.
+baseline. The answer model and the embedding model are not part of the build.
+When they are missing, they are downloaded into the Hugging Face cache on first
+use.
 
 Build with make:
 
@@ -426,10 +422,10 @@ build/release/semantic-bge-small-en-v1.5-q8_0.hnsw
 build/release/semantic-bge-small-en-v1.5-q8_0.meta
 ```
 
-The build contains the embedding model, llama.cpp, and the compiled GPU shaders.
-The answer model (default MiniCPM5, ~656 MB) is downloaded on demand into the local HuggingFace cache.
-The embedding model is linked into the executable; the answer model is loaded from disk when the
-answer mode is opened for the first time.
+The build contains llama.cpp and the compiled GPU shaders.
+The answer model (default MiniCPM5, ~656 MB) and the embedding model are
+downloaded on demand into the local Hugging Face cache. Both are loaded from
+disk when they are first needed.
 
 Run it directly:
 
@@ -445,8 +441,9 @@ make install
 ```
 
 The install step copies the binary, Markdown sources and indexes into `$HOME/.local/bin`.
-Make sure that directory is on `PATH`; llama.cpp and the embedding model are linked statically.
-The only runtime requirement beyond those files is the platform GPU stack.
+Make sure that directory is on `PATH`; llama.cpp is linked statically.
+The first semantic search needs network access to download the embedding model.
+The only other runtime requirement beyond those files is the platform GPU stack.
 After that, `.system docs "..."` works directly inside the DuckDB shell.
 
 ## How the data is built
@@ -483,7 +480,7 @@ file is also compared with the normalized Markdown, so a corrupted or truncated
 data file is regenerated. The vocabulary cache stores a word frequency table
 built from both Markdown files and is rebuilt when their combined fingerprint
 changes. The semantic metadata stores a combined SHA-1 fingerprint of both
-Markdown files and the embedded model, and the HNSW file is rebuilt when it does
+Markdown files and the embedding model, and the HNSW file is rebuilt when it does
 not match. The generated files can be deleted at any time; they are rebuilt on
 the next search.
 

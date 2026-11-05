@@ -47,16 +47,6 @@ set(DOCS_RUNTIME_FILES
   ${CMAKE_CURRENT_SOURCE_DIR}/semantic-bge-small-en-v1.5-q8_0.hnsw
   ${CMAKE_CURRENT_SOURCE_DIR}/semantic-bge-small-en-v1.5-q8_0.meta)
 
-# The semantic index uses a Q8_0 GGUF embedding model, and the model is always
-# embedded in the binary. scripts/fetch_models.sh downloads it into the source
-# directory; the build fails if the file is missing.
-set(DOCS_EMBED_MODEL_FILE ${CMAKE_CURRENT_SOURCE_DIR}/bge-small-en-v1.5-q8_0.gguf)
-if(NOT EXISTS ${DOCS_EMBED_MODEL_FILE})
-  message(FATAL_ERROR
-    "Semantic embedding model not found: ${DOCS_EMBED_MODEL_FILE}\n"
-    "Run scripts/fetch_models.sh before building.")
-endif()
-
 # Build the llama.cpp submodule as a static library. Its runtime is linked into
 # the docs binary, so no separate runtime installation is needed.
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
@@ -153,42 +143,6 @@ target_link_libraries(docs PRIVATE docs_core)
 if(WIN32)
   target_link_libraries(docs PRIVATE shell32)
 endif()
-
-# Embed the GGUF bytes directly into the executable. An assembly .incbin keeps
-# the build fast and avoids generating a huge C array; no separate model file is
-# needed at run time.
-file(SHA1 ${DOCS_EMBED_MODEL_FILE} DOCS_EMBEDDED_MODEL_SHA1)
-set(DOCS_MODEL_ASM ${CMAKE_CURRENT_BINARY_DIR}/embedded_model.S)
-if(APPLE)
-  set(DOCS_MODEL_SYMBOL_PREFIX "_")
-  set(DOCS_MODEL_SECTION "__TEXT,__const")
-  set(DOCS_ASM_NOTE "")
-else()
-  set(DOCS_MODEL_SYMBOL_PREFIX "")
-  set(DOCS_MODEL_SECTION ".rodata")
-  if(WIN32)
-    set(DOCS_ASM_NOTE "")
-  else()
-    set(DOCS_ASM_NOTE "    .section .note.GNU-stack,\"\",@progbits\n")
-  endif()
-endif()
-file(WRITE ${DOCS_MODEL_ASM}
-  "    .section ${DOCS_MODEL_SECTION}\n"
-  "    .p2align 6\n"
-  "    .globl ${DOCS_MODEL_SYMBOL_PREFIX}docs_model_gguf_start\n"
-  "    .globl ${DOCS_MODEL_SYMBOL_PREFIX}docs_model_gguf_end\n"
-  "${DOCS_MODEL_SYMBOL_PREFIX}docs_model_gguf_start:\n"
-  "    .incbin \"${DOCS_EMBED_MODEL_FILE}\"\n"
-  "${DOCS_MODEL_SYMBOL_PREFIX}docs_model_gguf_end:\n"
-  "${DOCS_ASM_NOTE}")
-target_sources(docs PRIVATE ${DOCS_MODEL_ASM})
-set_source_files_properties(${DOCS_MODEL_ASM} PROPERTIES
-  OBJECT_DEPENDS ${DOCS_EMBED_MODEL_FILE})
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-  ${DOCS_EMBED_MODEL_FILE})
-target_compile_definitions(docs_core PRIVATE
-  DOCS_EMBEDDED_MODEL_SHA1="${DOCS_EMBEDDED_MODEL_SHA1}")
-message(STATUS "Embedding semantic model ${DOCS_EMBED_MODEL_FILE}")
 
 if(DOCS_LINK_OPTIONS)
   target_link_options(docs PRIVATE ${DOCS_LINK_OPTIONS})
