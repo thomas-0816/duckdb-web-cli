@@ -3,6 +3,7 @@
 #include "arg.h"
 #include "chat.h"
 #include "download.h"
+#include "semantic.hpp"
 
 #include <llama.h>
 
@@ -424,9 +425,7 @@ void PrepareAnswerModel(const AnswerLoadProgress &progress) {
 	EnsureLlamaBackend();
 
 	llama_model_params model_params = llama_model_default_params();
-	// Offload as many layers as the active backend supports. The CPU backend is
-	// used automatically when no GPU is available.
-	model_params.n_gpu_layers = -1;
+	model_params.n_gpu_layers = GpuLayers();
 	model_params.progress_callback = ReportLoadProgress;
 	model_params.progress_callback_user_data = const_cast<AnswerLoadProgress *>(&progress);
 
