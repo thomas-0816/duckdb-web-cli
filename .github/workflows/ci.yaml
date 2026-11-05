@@ -54,8 +54,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     env:
-      # GitHub's macOS runners use a paravirtual Metal device, so keep inference
-      # on the CPU.
+      # GitHub's macOS runners use a paravirtual Metal device, so keep inference on the CPU.
       DOCS_GPU_LAYERS: 0
     strategy:
       fail-fast: false
@@ -141,4 +140,4 @@ jobs:
           sudo apt-get install -y clang-format-20 clang-tidy-20
           clang-format-20 -i src/**/*.cpp src/**/*.hpp
           intercept-build-20 make
-          run-clang-tidy-20 -p build/release -quiet -j$(nproc) -source-filter $(pwd)/src/
+          run-clang-tidy-20 -p build/release -quiet -source-filter $(pwd)/src/
