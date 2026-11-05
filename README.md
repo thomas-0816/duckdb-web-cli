@@ -210,14 +210,13 @@ first use and loaded through llama.cpp. Every page is split into chunks of at mo
 then embedded with the page title as context. The normalized vectors are stored
 in an HNSW index and searched with cosine similarity. Results are grouped back
 into complete pages, so several matching chunks from the same page still produce
-one result. The HNSW index, its metadata, and a small model revision cache are
-cached next to the other generated files:
+one result. The HNSW index and its metadata are cached next to the other generated
+files:
 
 ```text
 <binary directory>/
   semantic-bge-small-en-v1.5-q8_0.hnsw
   semantic-bge-small-en-v1.5-q8_0.meta
-  semantic-bge-small-en-v1.5-q8_0.rev
 ```
 
 The metadata records a SHA-1 fingerprint of the Markdown sources and the
@@ -419,7 +418,6 @@ build/release/duckdb-docs.md
 build/release/duckdb-blog.md
 build/release/semantic-bge-small-en-v1.5-q8_0.hnsw
 build/release/semantic-bge-small-en-v1.5-q8_0.meta
-build/release/semantic-bge-small-en-v1.5-q8_0.rev
 ```
 
 The build contains llama.cpp and the compiled GPU shaders.
@@ -472,7 +470,6 @@ files are written next to the binary:
   duckdb-vocabulary
   semantic-bge-small-en-v1.5-q8_0.hnsw
   semantic-bge-small-en-v1.5-q8_0.meta
-  semantic-bge-small-en-v1.5-q8_0.rev
 ```
 
 Each index stores the SHA-1 checksum of its Markdown source. If a source file

@@ -43,6 +43,9 @@ constexpr uint32_t SEMANTIC_VERSION = 1;
 constexpr const char *BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: ";
 constexpr const char *EMBEDDING_MODEL_HF_REPO = "ggml-org/bge-small-en-v1.5-Q8_0-GGUF:Q8_0";
 const SemanticModel SEMANTIC_MODEL = {"bge-small-en-v1.5-q8_0"};
+// The shipped index records this SHA-1. The model download is pinned to a fixed
+// HF revision, so the model is not rehashed on every start.
+constexpr const char *SEMANTIC_MODEL_REVISION = "embedded:03e4cfd53ed82c28044a2087f21c153483ecda9f";
 constexpr int EMBEDDING_CONTEXT_TOKENS = 512;
 constexpr int EMBEDDING_BATCH_TOKENS = 2048;
 constexpr int EMBEDDING_UBATCH_TOKENS = 2048;
@@ -325,7 +328,8 @@ private:
 		}
 		tokens.resize(static_cast<std::size_t>(count));
 		if (tokens.empty()) {
-			tokens.push_back(llama_vocab_eos(vocab)); // dont change to llama_vocab_bos, much slower
+			// WPM normally emits [CLS]/[SEP]; keep a fallback for empty input.
+			tokens.push_back(llama_vocab_bos(vocab));
 			tokens.push_back(llama_vocab_sep(vocab));
 		}
 		if (static_cast<int>(tokens.size()) > max_length_) {
@@ -514,39 +518,6 @@ std::string ReadTextFile(const std::string &path) {
 	return data;
 }
 
-std::string ModelRevision(const Embedder &embedder, const std::string &cache_path) {
-	const auto &model_path = embedder.Path();
-	std::error_code error;
-	auto size = std::filesystem::file_size(model_path, error);
-	if (error) {
-		throw std::runtime_error("Could not read " + model_path + ": " + error.message());
-	}
-	auto mtime = std::filesystem::last_write_time(model_path, error);
-	if (error) {
-		throw std::runtime_error("Could not read " + model_path + ": " + error.message());
-	}
-	auto stamp = static_cast<std::uintmax_t>(mtime.time_since_epoch().count());
-
-	// Hashing the model takes a few hundred milliseconds. Cache the result next
-	// to the index and reuse it while the model file is unchanged.
-	if (FileExists(cache_path)) {
-		std::ifstream input(cache_path, std::ios::binary);
-		std::uintmax_t cached_size = 0;
-		std::uintmax_t cached_stamp = 0;
-		std::string revision;
-		if (input >> cached_size >> cached_stamp >> revision && cached_size == size && cached_stamp == stamp) {
-			return revision;
-		}
-	}
-
-	// The prefix is historical: the shipped index was built when the model was
-	// embedded in the binary. The hash still identifies the model bytes, so the
-	// prebuilt index stays valid after switching to a download.
-	auto revision = std::string("embedded:") + Sha1HexDigest(ReadTextFile(model_path));
-	WriteFileAtomic(cache_path, std::to_string(size) + " " + std::to_string(stamp) + " " + revision + "\n");
-	return revision;
-}
-
 //===--------------------------------------------------------------------===//
 // HNSW index
 //===--------------------------------------------------------------------===//
@@ -671,7 +642,6 @@ std::unique_ptr<SemanticIndex> LoadOrBuildIndex(const SemanticModel &model, cons
 struct Engine {
 	std::unique_ptr<Embedder> embedder;
 	std::unique_ptr<SemanticIndex> index;
-	std::string revision;
 	std::string fingerprint;
 };
 
@@ -696,17 +666,13 @@ void EnsureSemanticIndex(const std::vector<SemanticDocument> &documents, const s
 	auto base = JoinPath(paths.cache_dir, "semantic-" + SanitizeModelId(SEMANTIC_MODEL.id));
 	auto index_path = base + ".hnsw";
 	auto meta_path = base + ".meta";
-	auto revision_path = base + ".rev";
 
 	auto &engine = GetEngine();
 	if (!engine.embedder) {
 		engine.embedder = std::make_unique<Embedder>();
 	}
-	if (engine.revision.empty()) {
-		engine.revision = ModelRevision(*engine.embedder, revision_path);
-	}
 
-	auto effective_fingerprint = fingerprint + "|model:" + engine.revision;
+	auto effective_fingerprint = fingerprint + "|model:" + SEMANTIC_MODEL_REVISION;
 
 	if (!engine.index || engine.fingerprint != effective_fingerprint) {
 		engine.index =
