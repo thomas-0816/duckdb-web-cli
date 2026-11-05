@@ -878,7 +878,12 @@ std::vector<std::string> ChunkSemanticText(const std::string &prefix, const std:
 		}
 		chunk = TrimMarkdownText(chunk);
 		if (!chunk.empty()) {
-			chunks.push_back(prefix + "\n\n" + chunk);
+			std::string combined;
+			combined.reserve(prefix.size() + 2 + chunk.size());
+			combined += prefix;
+			combined += "\n\n";
+			combined += chunk;
+			chunks.push_back(std::move(combined));
 		}
 		start = end;
 	}

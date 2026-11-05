@@ -129,7 +129,11 @@ target_include_directories(docs_core
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(docs_core PRIVATE -ffunction-sections -fdata-sections)
-  set(DOCS_LINK_OPTIONS -Wl,--gc-sections -s)
+  if(APPLE)
+    set(DOCS_LINK_OPTIONS -Wl,-dead_strip)
+  else()
+    set(DOCS_LINK_OPTIONS -Wl,--gc-sections -s)
+  endif()
 endif()
 
 add_executable(docs src/cli/docs_main.cpp)

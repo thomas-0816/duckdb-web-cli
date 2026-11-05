@@ -65,7 +65,8 @@ bool FileExists(const std::string &path) {
 }
 
 std::size_t EmbeddedModelSize() {
-	return static_cast<std::size_t>(docs_model_gguf_end - docs_model_gguf_start);
+	return static_cast<std::size_t>(reinterpret_cast<std::uintptr_t>(docs_model_gguf_end) -
+	                                reinterpret_cast<std::uintptr_t>(docs_model_gguf_start));
 }
 
 std::string JoinPath(const std::string &base, const std::string &relative) {
@@ -599,7 +600,7 @@ std::unique_ptr<SemanticIndex> LoadOrBuildIndex(const SemanticModel &model, cons
 				result->index->setEf(result->ef_search);
 				return result;
 			}
-		} catch (...) {
+		} catch (...) { // NOLINT(bugprone-empty-catch)
 			// A truncated or incompatible index is rebuilt below.
 		}
 	}

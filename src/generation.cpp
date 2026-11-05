@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -117,7 +118,7 @@ private:
 		auto fraction = static_cast<float>(static_cast<double>(progress.downloaded) /
 		                                   static_cast<double>(progress.total));
 		fraction = std::max(0.0f, std::min(1.0f, fraction));
-		auto percent = static_cast<int>(fraction * 100.0f + 0.5f);
+		auto percent = static_cast<int>(std::lround(fraction * 100.0f));
 		if (percent == last_percent_) {
 			return;
 		}

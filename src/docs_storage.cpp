@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -92,10 +93,11 @@ private:
 	void Transform(const unsigned char *block) {
 		uint32_t words[80];
 		for (int i = 0; i < 16; i++) {
-			words[i] = (static_cast<uint32_t>(block[i * 4]) << 24) |
-			           (static_cast<uint32_t>(block[i * 4 + 1]) << 16) |
-			           (static_cast<uint32_t>(block[i * 4 + 2]) << 8) |
-			           static_cast<uint32_t>(block[i * 4 + 3]);
+			const auto offset = static_cast<std::ptrdiff_t>(i) * 4;
+			words[i] = (static_cast<uint32_t>(block[offset]) << 24) |
+			           (static_cast<uint32_t>(block[offset + 1]) << 16) |
+			           (static_cast<uint32_t>(block[offset + 2]) << 8) |
+			           static_cast<uint32_t>(block[offset + 3]);
 		}
 		for (int i = 16; i < 80; i++) {
 			words[i] = RotateLeft(words[i - 3] ^ words[i - 8] ^ words[i - 14] ^ words[i - 16], 1);
@@ -588,7 +590,7 @@ std::string DownloadUrl(const std::string &url) {
 std::string FormatSize(std::size_t bytes) {
 	std::ostringstream output;
 	output << std::fixed << std::setprecision(1);
-	if (bytes >= 1024 * 1024) {
+	if (bytes >= std::size_t{1024} * 1024) {
 		output << (static_cast<double>(bytes) / (1024.0 * 1024.0)) << " MB";
 	} else if (bytes >= 1024) {
 		output << (static_cast<double>(bytes) / 1024.0) << " KB";

@@ -1,14 +1,15 @@
 BUILD_DIR ?= build/release
 PREFIX ?= $(HOME)/.local
 CMAKE ?= cmake
+JOBS ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN)
 
 .PHONY: all release install clean test test-semantic deps
 
 all: release
 
 release:
-	$(CMAKE) -S . -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=Release
-	$(CMAKE) --build $(BUILD_DIR) --parallel 8
+	$(CMAKE) -S . -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+	$(CMAKE) --build $(BUILD_DIR) --parallel $(JOBS)
 
 install: release
 	$(CMAKE) --install $(BUILD_DIR) --prefix $(PREFIX)
@@ -36,7 +37,6 @@ test-semantic: release
 
 deps:
 	git submodule update --init --recursive
-	scripts/fetch_models.sh
 
 clean:
 	rm -rf build

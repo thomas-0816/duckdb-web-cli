@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
+#include <cmath>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
@@ -148,7 +149,7 @@ std::string TailToWidth(const std::string &text, std::size_t max_width) {
 		if (width + chunk_width > max_width) {
 			break;
 		}
-		result = chunk + result;
+		result.insert(0, chunk);
 		width += chunk_width;
 	}
 	return result;
@@ -1105,7 +1106,6 @@ void DrawLiveSearch(const char *label, const std::string &query, std::size_t cur
 	auto show_answer = !results.empty();
 	auto answer_index = results.size();
 	auto quit_index = results.size() + (show_answer ? 1 : 0);
-	auto entry_count = quit_index + 1;
 	for (std::size_t row = 0; row < list_rows; row++) {
 		auto position = first + row;
 		std::string line;
@@ -1125,7 +1125,7 @@ void DrawLiveSearch(const char *label, const std::string &query, std::size_t cur
 			if (color) {
 				output += "\x1b[7m";
 			} else {
-				line = "> " + line;
+				line.insert(0, "> ");
 			}
 		}
 		output += line;
@@ -1419,7 +1419,7 @@ QueryEdit EditQuery(const char *label, SearchFunction search, idx_t limit, const
 						draw_loading(0.0f, "Preparing the answer model...");
 						try {
 							PrepareAnswerModel([&](float progress, const std::string &status) {
-								auto percent = static_cast<int>(progress * 100.0f + 0.5f);
+								auto percent = static_cast<int>(std::lround(progress * 100.0f));
 								if (percent != last_percent) {
 									last_percent = percent;
 									draw_loading(progress, status);
@@ -1815,7 +1815,7 @@ int RunPager(const char *label, SearchFunction search, idx_t limit, const std::s
 		}
 
 		bool edit_query = false;
-		std::size_t resume_index = current_index;
+		std::size_t resume_index;
 		std::string page_query;
 
 		{

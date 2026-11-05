@@ -7,6 +7,8 @@
 #include "generation.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <exception>
 #include <iostream>
@@ -28,9 +30,9 @@ constexpr const char *BOLD = "\x1b[1m";
 constexpr const char *DIM = "\x1b[2m";
 constexpr const char *HEADER_COLOR = "\x1b[1;38;5;39m";
 
-enum class ColorMode { AUTO,
-	                   ALWAYS,
-	                   NEVER };
+enum class ColorMode : std::uint8_t { AUTO,
+	                                  ALWAYS,
+	                                  NEVER };
 
 bool ParseLimit(const std::string &text, idx_t &result) {
 	if (text.empty()) {
@@ -162,7 +164,7 @@ int RunAnswerQuery(const char *program, const char *label, const std::string &qu
 			int last_percent = -1;
 			show_status("Preparing the answer model...");
 			PrepareAnswerModel([&](float progress, const std::string &status) {
-				auto percent = static_cast<int>(progress * 100.0f + 0.5f);
+				auto percent = static_cast<int>(std::lround(progress * 100.0f));
 				if (percent == last_percent) {
 					return;
 				}

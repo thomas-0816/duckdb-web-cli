@@ -520,7 +520,8 @@ program:
 
 ```bash
 clang-format-20 -i src/**/*.cpp src/**/*.hpp
-intercept-build-20 make && run-clang-tidy-20 -p . -quiet -source-filter ./src/
+intercept-build-20 make
+run-clang-tidy-20 -p build/release -quiet -j$(nproc) -source-filter $(pwd)/src/
 ```
 
 ## AI Disclosure

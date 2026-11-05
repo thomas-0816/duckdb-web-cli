@@ -6,6 +6,7 @@
 #include "generation.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <exception>
 #include <iostream>
@@ -80,7 +81,7 @@ void DrawAnswerLoading(const char *label, float progress, const std::string &mes
 	auto terminal = GetTerminalSize();
 	int columns = std::max(terminal.columns, 20);
 	auto width_limit = static_cast<std::size_t>(std::max(columns - 1, 1));
-	auto percent = static_cast<int>(std::max(0.0f, std::min(1.0f, progress)) * 100.0f + 0.5f);
+	auto percent = static_cast<int>(std::lround(std::max(0.0f, std::min(1.0f, progress)) * 100.0f));
 
 	std::string output = "\x1b[H";
 	if (color) {
@@ -258,9 +259,10 @@ SplitAnswerPage BuildSplitAnswerPage(const char *label, const std::string &query
 		line = TruncatePlain(line, width_limit);
 		if (active) {
 			if (color) {
-				line = std::string("\x1b[7m") + line + RESET;
+				line.insert(0, "\x1b[7m");
+				line += RESET;
 			} else {
-				line = "> " + line;
+				line.insert(0, "> ");
 			}
 		}
 		page.header.push_back(std::move(line));
@@ -380,7 +382,7 @@ void DrawSplitAnswerLoading(const char *label, const std::string &query, std::si
                             float progress, const std::string &message) {
 	auto size = GetTerminalSize();
 	auto columns = std::max(size.columns, 20);
-	auto percent = static_cast<int>(std::max(0.0f, std::min(1.0f, progress)) * 100.0f + 0.5f);
+	auto percent = static_cast<int>(std::lround(std::max(0.0f, std::min(1.0f, progress)) * 100.0f));
 	auto bar_width = static_cast<std::size_t>(std::max(10, std::min(44, columns - 12)));
 	auto filled = static_cast<std::size_t>(percent) * bar_width / 100;
 	std::string bar = "[";
@@ -859,7 +861,7 @@ bool RunAnswer(const char *label, const std::string &query, const std::vector<Se
 		int last_percent = -1;
 		DrawAnswerLoading(label, 0.0f, "Preparing the answer model...", color);
 		PrepareAnswerModel([&](float progress, const std::string &status) {
-			auto percent = static_cast<int>(progress * 100.0f + 0.5f);
+			auto percent = static_cast<int>(std::lround(progress * 100.0f));
 			if (percent != last_percent) {
 				last_percent = percent;
 				DrawAnswerLoading(label, progress, status, color);
