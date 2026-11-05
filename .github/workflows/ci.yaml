@@ -63,8 +63,6 @@ jobs:
     name: macOS
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
-    env:
-      DOCS_GPU_LAYERS: 0 # GitHub's macOS runners use a paravirtual Metal device, so keep inference on CPU
     strategy:
       fail-fast: false
       matrix:

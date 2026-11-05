@@ -71,7 +71,6 @@ jobs:
           - macos-15
           - macos-15-intel
     env:
-      DOCS_GPU_LAYERS: 0 # GitHub's macOS runners use a paravirtual Metal device, so keep inference on CPU
       VERSION: ${{ github.event.release.tag_name }}
       GH_TOKEN: ${{ github.token }}
     steps:
