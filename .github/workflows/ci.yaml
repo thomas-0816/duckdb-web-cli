@@ -70,12 +70,9 @@ jobs:
           persist-credentials: false
       - name: Build and Test
         run: |
-          brew install openssl@3
-          export OPENSSL_ROOT_DIR="$(brew --prefix openssl@3)"
           flags=(
             -DCMAKE_BUILD_RPATH="@loader_path"
             -DLLAMA_FATAL_WARNINGS=ON
-            -DGGML_METAL_EMBED_LIBRARY=OFF
             -DGGML_METAL_SHADER_DEBUG=ON
             -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3
           )

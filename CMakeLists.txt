@@ -61,7 +61,15 @@ set(LLAMA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_APP OFF CACHE BOOL "" FORCE)
-set(LLAMA_OPENSSL ON CACHE BOOL "" FORCE)
+if(WIN32 OR APPLE)
+  # Build the BoringSSL that llama.cpp vendors instead of relying on a system
+  # OpenSSL installation.
+  set(LLAMA_BUILD_BORINGSSL ON CACHE BOOL "" FORCE)
+  set(LLAMA_OPENSSL OFF CACHE BOOL "" FORCE)
+else()
+  set(LLAMA_BUILD_BORINGSSL OFF CACHE BOOL "" FORCE)
+  set(LLAMA_OPENSSL ON CACHE BOOL "" FORCE)
+endif()
 set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
 
 # GPU backends: Metal on Apple, Vulkan everywhere else (Linux and Windows).
@@ -69,7 +77,9 @@ set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
 # and llama.cpp falls back to the CPU backend otherwise.
 if(APPLE)
   set(GGML_METAL ON CACHE BOOL "" FORCE)
-  set(GGML_METAL_EMBED_LIBRARY ON CACHE BOOL "" FORCE)
+  # Precompile the Metal library at build time instead of compiling shaders at
+  # startup; virtualized Metal devices do not always support runtime compilation.
+  set(GGML_METAL_EMBED_LIBRARY OFF CACHE BOOL "" FORCE)
 else()
   set(GGML_VULKAN ON CACHE BOOL "" FORCE)
   if(WIN32)
@@ -100,10 +110,12 @@ target_include_directories(md4c PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/m
 
 # Missing Markdown corpora and the answer model are downloaded at startup
 # through llama.cpp's common download helpers, the same code the llama CLI
-# uses. The common library builds cpp-httplib with HTTPS support when OpenSSL
-# is available.
+# uses. The common library builds cpp-httplib with HTTPS support: against the
+# system OpenSSL on Linux, and against BoringSSL on macOS and Windows.
 find_package(Threads REQUIRED)
-find_package(OpenSSL REQUIRED)
+if(NOT WIN32 AND NOT APPLE)
+  find_package(OpenSSL REQUIRED)
+endif()
 
 add_library(docs_core STATIC
   src/docs_search.cpp
@@ -185,6 +197,18 @@ if(DOCS_LINK_OPTIONS)
   target_link_options(docs PRIVATE ${DOCS_LINK_OPTIONS})
 endif()
 set_target_properties(docs PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+
+# The non-embedded Metal build writes its shader library to the llama.cpp bin
+# directory. Put it next to the docs binary, where llama.cpp looks for it.
+if(APPLE)
+  add_dependencies(docs ggml-metal-lib)
+  add_custom_command(TARGET docs POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      ${CMAKE_BINARY_DIR}/bin/default.metallib
+      $<TARGET_FILE_DIR:docs>
+    COMMENT "Copying the Metal shader library next to the docs binary"
+    VERBATIM)
+endif()
 
 # Keep the Markdown sources next to the binary so it works directly from the
 # build tree. Generated index/data files are written next to the binary as well,
