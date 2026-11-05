@@ -106,7 +106,7 @@ void ConfigureLlamaBackend() {
 	// With CPU-only inference, do not initialize the GPU backend at all. This
 	// keeps the Vulkan driver out of the picture in containers and on machines
 	// that expose a virtual GPU that cannot run inference.
-	if (GpuLayers() == 0 && std::getenv("GGML_DISABLE_VULKAN") == nullptr) {
+	if (GpuLayers() == 0) {
 #if defined(_WIN32)
 		_putenv_s("GGML_DISABLE_VULKAN", "1");
 #else

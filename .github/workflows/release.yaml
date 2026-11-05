@@ -149,7 +149,6 @@ jobs:
           cp build/release/docs.exe duckdb-docs.md duckdb-blog.md LICENSE README.md \
             semantic-bge-small-en-v1.5-q8_0.hnsw semantic-bge-small-en-v1.5-q8_0.meta \
             "dist/${name}/"
-
           vulkan_sdk="$(cygpath -u "$VULKAN_SDK")"
           vulkan_loader="$(find "$vulkan_sdk" -maxdepth 2 -type f -iname 'vulkan-1.dll' | sort | tail -1)"
           if [[ -z "$vulkan_loader" ]]; then
@@ -157,7 +156,6 @@ jobs:
             exit 1
           fi
           cp "$vulkan_loader" "dist/${name}/"
-
           vswhere="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
           if [[ ! -x "$vswhere" ]]; then
             echo "vswhere not found at $vswhere" >&2
@@ -171,16 +169,12 @@ jobs:
             exit 1
           fi
           cp "$crt_dir"/msvcp140*.dll "$crt_dir"/vcruntime140*.dll "$crt_dir"/concrt140.dll "dist/${name}/"
-
-          # The executable imports these directly, so a missing file would make
-          # the release unusable on a clean Windows installation.
           for dll in vulkan-1.dll msvcp140.dll vcruntime140.dll vcruntime140_1.dll; do
             if [[ ! -f "dist/${name}/${dll}" ]]; then
               echo "missing runtime dependency: ${dll}" >&2
               exit 1
             fi
           done
-
           DOCS_STAGE="dist/${name}" powershell.exe -NoProfile -Command \
             "Compress-Archive -Path \$env:DOCS_STAGE -DestinationPath (\$env:DOCS_STAGE + '.zip') -Force"
           gh release upload "${VERSION}" "dist/${name}.zip" --repo "${GITHUB_REPOSITORY}" --clobber
