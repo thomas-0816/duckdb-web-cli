@@ -205,8 +205,7 @@ Both commands return the Parquet pages first. Short keyword queries use the same
 semantic index; there is no separate lexical ranking.
 
 The semantic index is built from the Markdown the first time it is needed. The
-embedding model is `BAAI/bge-small-en-v1.5`, downloaded from
-`ggml-org/bge-small-en-v1.5-Q8_0-GGUF` into the shared Hugging Face cache on
+embedding model is `BAAI/bge-small-en-v1.5`, downloaded from HuggingFace cache on
 first use and loaded through llama.cpp. Every page is split into chunks of at most about 1800 characters,
 then embedded with the page title as context. The normalized vectors are stored
 in an HNSW index and searched with cosine similarity. Results are grouped back
@@ -237,9 +236,8 @@ Index builds use four CPU threads and offload the model to the GPU if possible,
 which keeps the rest of the system responsive. Later searches load the saved HNSW
 index in a fraction of a second.
 
-The embedding model is `BAAI/bge-small-en-v1.5`. The model is not part of the
-build: it is downloaded into the Hugging Face cache when semantic search first
-runs, and the llama CLI shares the same cache. The llama.cpp submodule is linked
+The embedding model is `BAAI/bge-small-en-v1.5`. The model is downloaded into the
+HuggingFace cache when semantic search first runs. The llama.cpp submodule is linked
 statically. The only runtime dependency is the platform GPU stack: the Vulkan
 loader on Linux and Windows, and Metal on macOS.
 
@@ -423,7 +421,7 @@ build/release/semantic-bge-small-en-v1.5-q8_0.meta
 ```
 
 The build contains llama.cpp and the compiled GPU shaders.
-The answer model (default MiniCPM5, ~656 MB) and the embedding model are
+The answer model (default MiniCPM5, ~656 MB) and the embedding model (bge-small-en-v1.5) are
 downloaded on demand into the local Hugging Face cache. Both are loaded from
 disk when they are first needed.
 
