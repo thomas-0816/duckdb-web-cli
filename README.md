@@ -388,8 +388,8 @@ no ANSI escapes. `NO_COLOR` and `CLICOLOR_FORCE` are honored in `auto` mode.
 Requirements:
 
 - a C99 compiler and a C++17 compiler
-- CMake 3.16 or newer
-- OpenSSL development headers, used to download the Markdown sources over HTTPS
+- CMake 3.22 or newer
+- network access when configuring, to fetch the pinned BoringSSL used for HTTPS downloads
 - the embedding model file
 - on Linux and Windows, the Vulkan SDK (including `glslc`)
 - on macOS, the Metal toolchain that ships with Xcode
