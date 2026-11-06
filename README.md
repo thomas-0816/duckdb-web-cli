@@ -46,7 +46,7 @@ in one directory. The cache is invalidated with checksums of the source files,
 so updating a Markdown file rebuilds the indexes automatically.
 Generated files can be deleted at any time.
 
-## Setup Ubuntu, Debian
+## Setup with Ubuntu, Debian
 
 ```bash
 apt-get update
@@ -56,9 +56,19 @@ tar xvzf duckdb-web-cli-linux-x64.tar.gz
 duckdb-web-cli-linux-x64/docs
 ```
 
+## Setup with MacOS
+
+```bash
+curl -fsSL -o duckdb-web-cli-linux-x64.tar.gz https://github.com/thomas-0816/duckdb-web-cli/releases/latest/download/duckdb-web-cli-linux-x64.tar.gz
+tar xvzf duckdb-web-cli-linux-x64.tar.gz
+duckdb-web-cli-linux-x64/docs
+```
+
 ## Hardware requirements
 
 Standard computer with AMD, Intel, Apple, older machines with integrated GPU are ok, e.g. Intel Core-i3 12gen.
+Free disk space: 700M
+Minimum VRAM: 1GB
 
 ## Using it from the DuckDB shell
 

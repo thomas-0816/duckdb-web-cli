@@ -32,9 +32,10 @@ struct SemanticModel {
 };
 
 //! Return the index of the preferred GPU device, or -1 when there is none.
-//! Discrete GPUs are preferred over integrated GPUs. Discrete devices are
-//! probed by initializing the backend and allocating memory. Paravirtual Metal
-//! devices are rejected because they crash when used.
+//! Discrete GPUs are preferred over integrated GPUs. Devices reporting less
+//! than 1 GB of total memory are ignored. Discrete devices are probed by
+//! initializing the backend and allocating memory. Paravirtual Metal devices
+//! are rejected because they crash when used.
 int getGpuByProbing();
 
 //! Initialize llama.cpp once.
