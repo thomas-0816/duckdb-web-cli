@@ -61,7 +61,7 @@ duckdb-web-cli-linux-x64/docs
 ```bash
 curl -fsSL -o duckdb-web-cli-macos-arm64.tar.gz https://github.com/thomas-0816/duckdb-web-cli/releases/latest/download/duckdb-web-cli-macos-arm64.tar.gz
 tar xvzf duckdb-web-cli-macos-arm64.tar.gz
-duckdb-web-cli-linux-x64/docs
+duckdb-web-cli-macos-arm64/docs
 ```
 
 ## Setup with Windows
