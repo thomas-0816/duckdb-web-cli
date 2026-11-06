@@ -152,9 +152,11 @@ public:
 		int gpu = getGpuByProbing();
 		auto model_params = llama_model_default_params();
 		model_params.n_gpu_layers = gpu >= 0 ? -1 : 0;
-		ggml_backend_dev_t devices[] = {gpu >= 0 ? ggml_backend_dev_get(static_cast<size_t>(gpu)) : nullptr, nullptr};
-		model_params.devices = devices;
-		if (model_params.n_gpu_layers == 0) {
+		ggml_backend_dev_t devices[] = {nullptr, nullptr};
+		if (gpu >= 0) {
+			devices[0] = ggml_backend_dev_get(static_cast<size_t>(gpu));
+			model_params.devices = devices;
+		} else {
 			// No usable GPU. Keep the model on the CPU and avoid placing any tensors
 			// on a backend that cannot allocate memory.
 			model_params.split_mode = LLAMA_SPLIT_MODE_NONE;
@@ -667,8 +669,15 @@ int getGpuByProbing() {
 			for (auto &c : description) {
 				c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 			}
-			// Initializing a paravirtual Metal device crashes on CI runners.
-			if (description.find("paravirtual") != std::string::npos) {
+			// Paravirtual Metal devices on CI runners crash when used.
+			if (description.find("virtual") != std::string::npos) {
+				return -1;
+			}
+			// Only probe discrete Metal GPUs. Integrated GPUs do not need a
+			// probe and are used directly.
+			if (description.find("amd") == std::string::npos &&
+			    description.find("radeon") == std::string::npos &&
+			    description.find("nvidia") == std::string::npos) {
 				return static_cast<int>(i);
 			}
 #endif
