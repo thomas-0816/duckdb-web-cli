@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdio>
 #include <exception>
 #include <iostream>
 #include <string>
@@ -63,6 +64,12 @@ std::string ComposeAnswerContent(const std::string &reasoning, const std::string
 		content += "\n**Error:** " + error + "\n";
 	}
 	return content;
+}
+
+std::string FormatTokenSpeed(double tokens_per_second) {
+	char buffer[32];
+	std::snprintf(buffer, sizeof(buffer), "%.1f", std::max(0.0, tokens_per_second));
+	return buffer;
 }
 
 std::string EscapeMarkdownLinkText(const std::string &text) {
@@ -612,7 +619,7 @@ AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
 	try {
 		GenerateAnswer(
 		    query, results,
-		    [&](const std::string &piece, bool is_reasoning) {
+		    [&](const std::string &piece, bool is_reasoning, double tokens_per_second) {
 			    if (!is_reasoning && !answer_started) {
 				    answer_started = true;
 				    reasoning.clear();
@@ -626,9 +633,10 @@ AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
 				    target.append(pending, 0, complete);
 				    pending.erase(0, complete);
 			    }
+			    auto speed = FormatTokenSpeed(tokens_per_second);
 			    auto status = is_reasoning
-			                      ? " Thinking  |  Up/Down  |  Enter restart  |  Esc stop"
-			                      : " Answering  |  Up/Down  |  Enter restart  |  Esc stop";
+			                      ? " Thinking " + speed + " t/s  |  Up/Down  |  Enter restart  |  Esc stop"
+			                      : " Answering " + speed + " t/s  |  Up/Down  |  Enter restart  |  Esc stop";
 			    if (!handle_pending_input(status, true)) {
 				    return false;
 			    }
@@ -767,7 +775,7 @@ bool ShowAnswer(const char *label, const std::string &query, const std::vector<S
 
 		draw(" Reading the top 10 matching blocks  |  Please wait");
 		try {
-			GenerateAnswer(query, results, [&](const std::string &piece, bool is_reasoning) {
+			GenerateAnswer(query, results, [&](const std::string &piece, bool is_reasoning, double tokens_per_second) {
 				if (!is_reasoning && !answer_started) {
 					// The model has stopped thinking. Drop the reasoning from the live
 					// view so the answer starts at the top of the page.
@@ -783,9 +791,10 @@ bool ShowAnswer(const char *label, const std::string &query, const std::vector<S
 					target.append(pending, 0, complete);
 					pending.erase(0, complete);
 				}
+				auto speed = FormatTokenSpeed(tokens_per_second);
 				auto status = is_reasoning
-				                  ? " Thinking  |  Esc stop  |  Enter restart  |  Ctrl+c Quit"
-				                  : " Answering  |  Esc stop  |  Enter restart  |  Ctrl+c Quit";
+				                  ? " Thinking " + speed + " t/s  |  Esc stop  |  Enter restart  |  Ctrl+c Quit"
+				                  : " Answering " + speed + " t/s  |  Esc stop  |  Enter restart  |  Ctrl+c Quit";
 				if (ResizePending()) {
 					ClearResizePending();
 					draw(status);

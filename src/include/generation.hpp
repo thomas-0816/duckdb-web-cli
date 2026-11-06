@@ -33,9 +33,11 @@ using AnswerLoadProgress = std::function<void(float progress, const std::string 
 void PrepareAnswerModel(const AnswerLoadProgress &progress = nullptr);
 
 //! Receives generated UTF-8 text as it becomes available. `reasoning` is true
-//! for the model's thinking text, before the thinking end tag. `tokens` is the
-//! number of tokens generated so far. Returning false stops generation.
-using AnswerTokenCallback = std::function<bool(const std::string &text, bool reasoning, std::size_t tokens)>;
+//! for the model's thinking text, before the thinking end tag.
+//! `tokens_per_second` is the generation speed reported by llama.cpp's timings.
+//! Returning false stops generation.
+using AnswerTokenCallback =
+    std::function<bool(const std::string &text, bool reasoning, double tokens_per_second)>;
 
 //! Reports prompt-processing progress. `done` and `total` count prompt tokens.
 using AnswerPromptProgress = std::function<void(std::size_t done, std::size_t total)>;

@@ -278,9 +278,11 @@ PromptRender RenderAnswerPrompt(const AnswerEngine &engine, const std::string &q
 	}
 }
 
+using TokenEmitter = std::function<bool(const std::string &text, bool reasoning)>;
+
 class ReasoningSplitter {
 public:
-	ReasoningSplitter(const std::vector<std::string> &end_tags, const AnswerTokenCallback &callback)
+	ReasoningSplitter(const std::vector<std::string> &end_tags, const TokenEmitter &callback)
 	    : callback_(callback) {
 		for (auto &tag : end_tags) {
 			if (!tag.empty()) {
@@ -362,7 +364,7 @@ private:
 		return true;
 	}
 
-	const AnswerTokenCallback &callback_;
+	const TokenEmitter &callback_;
 	std::vector<std::string> end_tags_;
 	std::string buffer_;
 	bool reasoning_ = false;
@@ -454,6 +456,7 @@ void PrepareAnswerModel(const AnswerLoadProgress &progress) {
 	context_params.n_threads = ANSWER_THREADS;
 	context_params.n_threads_batch = ANSWER_THREADS;
 	context_params.embeddings = false;
+	context_params.no_perf = false;
 
 	auto context = llama_init_from_model(model, context_params);
 	if (!context) {
@@ -518,27 +521,33 @@ void GenerateAnswer(const std::string &question, const std::vector<SearchResult>
 	llama_sampler_chain_add(sampler, llama_sampler_init_temp(ANSWER_TEMPERATURE));
 	llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
 
-	std::size_t generated_tokens = 0;
-	AnswerTokenCallback counted_callback = [&](const std::string &text, bool reasoning) {
-		return callback(text, reasoning, generated_tokens);
+	double tokens_per_second = 0.0;
+	TokenEmitter counted_callback = [&](const std::string &text, bool reasoning) {
+		return callback(text, reasoning, tokens_per_second);
 	};
 	ReasoningSplitter splitter(prompt.thinking_end_tags, counted_callback);
 	try {
 		DecodePrompt(engine.context, prompt.tokens, prompt_progress);
+		llama_perf_context_reset(engine.context);
 		for (int generated = 0; generated < ANSWER_MAX_OUTPUT_TOKENS; generated++) {
 			auto token = llama_sampler_sample(sampler, engine.context, -1);
 			if (llama_vocab_is_eog(vocab, token)) {
 				break;
 			}
-			generated_tokens = static_cast<std::size_t>(generated) + 1;
 			auto piece = TokenToPiece(vocab, token);
-			if (!piece.empty() && !splitter.Feed(piece)) {
-				break;
-			}
 			auto batch = llama_batch_get_one(&token, 1);
 			auto status = llama_decode(engine.context, batch);
 			if (status != 0) {
 				throw std::runtime_error("The answer model stopped with status " + std::to_string(status));
+			}
+
+			auto timings = llama_perf_context(engine.context);
+			if (timings.t_eval_ms > 0.0) {
+				tokens_per_second = timings.n_eval * 1000.0 / timings.t_eval_ms;
+			}
+
+			if (!piece.empty() && !splitter.Feed(piece)) {
+				break;
 			}
 		}
 		if (!splitter.Finish()) {

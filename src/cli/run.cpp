@@ -210,7 +210,7 @@ int RunAnswerQuery(const char *program, const char *label, const std::string &qu
 	try {
 		GenerateAnswer(
 		    query, blocks,
-		    [&](const std::string &piece, bool reasoning) {
+		    [&](const std::string &piece, bool reasoning, double /*tokens_per_second*/) {
 			    if (!status_cleared) {
 				    clear_status();
 				    status_cleared = true;
