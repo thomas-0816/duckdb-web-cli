@@ -608,7 +608,7 @@ AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
 		return !stop;
 	};
 
-	draw("Reading the top 10 matching blocks  |  Please wait");
+	draw(" Reading the top 10 matching blocks  |  Please wait");
 	try {
 		GenerateAnswer(
 		    query, results,
@@ -628,7 +628,7 @@ AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
 			    }
 			    auto status = is_reasoning
 			                      ? " Thinking  |  Up/Down  |  Enter restart  |  Esc stop"
-			                      : "Answering  |  Up/Down  |  Enter restart  |  Esc stop";
+			                      : " Answering  |  Up/Down  |  Enter restart  |  Esc stop";
 			    if (!handle_pending_input(status, true)) {
 				    return false;
 			    }
@@ -645,7 +645,7 @@ AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
 			    constexpr std::size_t BAR_WIDTH = 20;
 			    std::string bar(BAR_WIDTH, ' ');
 			    std::fill_n(bar.begin(), static_cast<std::size_t>(percent) * BAR_WIDTH / 100, '#');
-			    auto status = "Processing prompt [" + bar + "] " + std::to_string(percent) + "%";
+			    auto status = " Processing prompt [" + bar + "] " + std::to_string(percent) + "%";
 			    if (!handle_pending_input(status, true)) {
 				    return;
 			    }
@@ -684,7 +684,7 @@ AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
 		view.follow_tail = false;
 		view.scroll = 0;
 	}
-	auto status = "Answer  |  Enter restart  |  Up/Down  |  PgUp/PgDn scroll  |  Ctrl+c Quit";
+	auto status = " Answer  |  Enter restart  |  Up/Down  |  PgUp/PgDn scroll  |  Ctrl+c Quit";
 	draw(status);
 	while (true) {
 		auto key = ReadKey();
@@ -765,7 +765,7 @@ bool ShowAnswer(const char *label, const std::string &query, const std::vector<S
 		restart = false;
 		error.clear();
 
-		draw("Reading the top 10 matching blocks  |  Please wait");
+		draw(" Reading the top 10 matching blocks  |  Please wait");
 		try {
 			GenerateAnswer(query, results, [&](const std::string &piece, bool is_reasoning) {
 				if (!is_reasoning && !answer_started) {
@@ -785,7 +785,7 @@ bool ShowAnswer(const char *label, const std::string &query, const std::vector<S
 				}
 				auto status = is_reasoning
 				                  ? " Thinking  |  Esc stop  |  Enter restart  |  Ctrl+c Quit"
-				                  : "Answering  |  Esc stop  |  Enter restart  |  Ctrl+c Quit";
+				                  : " Answering  |  Esc stop  |  Enter restart  |  Ctrl+c Quit";
 				if (ResizePending()) {
 					ClearResizePending();
 					draw(status);
@@ -816,7 +816,7 @@ bool ShowAnswer(const char *label, const std::string &query, const std::vector<S
 				constexpr std::size_t BAR_WIDTH = 20;
 				std::string bar(BAR_WIDTH, ' ');
 				std::fill_n(bar.begin(), static_cast<std::size_t>(percent) * BAR_WIDTH / 100, '#');
-				auto status = "Processing prompt [" + bar + "] " + std::to_string(percent) + "%";
+				auto status = " Processing prompt [" + bar + "] " + std::to_string(percent) + "%";
 				draw(status); });
 		} catch (const std::exception &exception) {
 			error = exception.what();
@@ -845,7 +845,7 @@ bool ShowAnswer(const char *label, const std::string &query, const std::vector<S
 
 		SearchResult result;
 		result.content = content;
-		result.title = "Answer: " + query;
+		result.title = " Answer: " + query;
 		bool regenerate = false;
 		auto done = RunInternalPage(label, result, color, false, &regenerate);
 		if (!regenerate) {
@@ -859,7 +859,7 @@ bool RunAnswer(const char *label, const std::string &query, const std::vector<Se
 	RawMode raw_mode;
 	if (!AnswerModelLoaded()) {
 		int last_percent = -1;
-		DrawAnswerLoading(label, 0.0f, "Preparing the answer model...", color);
+		DrawAnswerLoading(label, 0.0f, " Preparing the answer model...", color);
 		PrepareAnswerModel([&](float progress, const std::string &status) {
 			auto percent = static_cast<int>(std::lround(progress * 100.0f));
 			if (percent != last_percent) {

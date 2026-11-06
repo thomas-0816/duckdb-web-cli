@@ -13,6 +13,10 @@ It offers an interactive terminal UI and a non-interactive mode which can be
 used by LLMs to extend their knowledge with the latest version of DuckDB.
 With the integration of Llama.cpp, questions can also be answered with an LLM.
 
+## Demo Video
+
+[![Tool for viewing and searching docs for DuckDB demo](demo-preview.webp)](https://thomas-0816.github.io/duckdb-web-cli/demo.mp4)
+
 ## How it works
 
 The binary loads the Markdown sources that sit next to it and builds compact
@@ -51,6 +55,10 @@ wget https://github.com/thomas-0816/duckdb-web-cli/releases/latest/download/duck
 tar xvzf duckdb-web-cli-linux-x64.tar.gz
 duckdb-web-cli-linux-x64/docs
 ```
+
+## Hardware requirements
+
+Standard computer with AMD, Intel, Apple, older machines with integrated GPU are ok, e.g. Intel Core-i3 12gen.
 
 ## Using it from the DuckDB shell
 

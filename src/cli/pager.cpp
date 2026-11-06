@@ -1263,14 +1263,14 @@ void DrawLiveSearch(const char *label, const std::string &query, std::size_t cur
 
 	std::string status;
 	if (!error.empty()) {
-		status = "Error: " + error;
+		status = " Error: " + error;
 	} else if (query.empty()) {
-		status = "Type to search  |  Up/Down select  |  Ctrl+c Quit";
+		status = " Type to search  |  Up/Down select  |  Ctrl+c Quit";
 	} else if (results.empty()) {
-		status = "No search results  |  Ctrl+c Quit";
+		status = " No search results  |  Ctrl+c Quit";
 	} else {
 		auto enter = from_pager ? "Enter apply" : "Enter open";
-		status = std::to_string(results.size()) + (results.size() == 1 ? " result" : " results") +
+		status = " " + std::to_string(results.size()) + (results.size() == 1 ? " result" : " results") +
 		         "  |  Up/Down select  |  " + enter + "  |  Ctrl+c Quit";
 	}
 	auto status_limit = static_cast<std::size_t>(std::max(columns - 1, 1));
