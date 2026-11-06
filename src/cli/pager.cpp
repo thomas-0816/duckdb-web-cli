@@ -1542,7 +1542,7 @@ QueryEdit EditQuery(const char *label, SearchFunction search, idx_t limit, const
 							DrawSplitAnswerLoading(label, edit.query, edit.cursor, edit.results, edit.selected, color,
 							                       progress, message);
 						};
-						draw_loading(0.0f, "Preparing the answer model...");
+						draw_loading(0.0f, " Preparing the answer model...");
 						try {
 							PrepareAnswerModel([&](float progress, const std::string &status) {
 								auto percent = static_cast<int>(std::lround(progress * 100.0f));

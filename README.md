@@ -59,9 +59,18 @@ duckdb-web-cli-linux-x64/docs
 ## Setup with MacOS
 
 ```bash
-curl -fsSL -o duckdb-web-cli-linux-x64.tar.gz https://github.com/thomas-0816/duckdb-web-cli/releases/latest/download/duckdb-web-cli-linux-x64.tar.gz
-tar xvzf duckdb-web-cli-linux-x64.tar.gz
+curl -fsSL -o duckdb-web-cli-macos-arm64.tar.gz https://github.com/thomas-0816/duckdb-web-cli/releases/latest/download/duckdb-web-cli-macos-arm64.tar.gz
+tar xvzf duckdb-web-cli-macos-arm64.tar.gz
 duckdb-web-cli-linux-x64/docs
+```
+
+## Setup with Windows
+
+```bash
+powershell
+Invoke-WebRequest -UseBasicParsing -Uri https://github.com/thomas-0816/duckdb-web-cli/releases/latest/download/duckdb-web-cli-windows-x64.zip -OutFile duckdb-web-cli-windows-x64.zip
+Expand-Archive -Path duckdb-web-cli-windows-x64.zip -DestinationPath . -Force
+duckdb-web-cli-windows-x64\docs
 ```
 
 ## Hardware requirements

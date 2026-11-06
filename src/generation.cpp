@@ -31,7 +31,7 @@ constexpr const char *ANSWER_MODEL_DOWNLOAD_SIZE = "656 MB";
 constexpr int ANSWER_CONTEXT_TOKENS = 16384;
 constexpr int ANSWER_MAX_OUTPUT_TOKENS = 2048;
 constexpr int ANSWER_BATCH_TOKENS = 2048;
-constexpr int ANSWER_UBATCH_TOKENS = 512;
+constexpr int ANSWER_UBATCH_TOKENS = 1024;
 constexpr int ANSWER_THREADS = 8;
 
 constexpr float ANSWER_TEMPERATURE = 0.9f;
