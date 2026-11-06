@@ -249,9 +249,8 @@ index in a fraction of a second.
 The embedding model is `BAAI/bge-small-en-v1.5`. The model is downloaded into the
 HuggingFace cache when semantic search first runs. The llama.cpp submodule is linked
 statically. The platform GPU stack is used when available: the Vulkan loader on
-Linux and Windows, and Metal on macOS. Set `DOCS_GPU_LAYERS=0` to keep inference on
-the CPU in Windows containers and virtual machines that expose a GPU that cannot run
-inference.
+Linux and Windows, and Metal on macOS. If the GPU cannot create a context, inference
+falls back to the CPU.
 
 ## Search quality
 
@@ -454,9 +453,8 @@ make install
 The install step copies the binary, Markdown sources and indexes into `$HOME/.local/bin`.
 Make sure that directory is on `PATH`; llama.cpp is linked statically.
 The first semantic search needs network access to download the embedding model.
-The platform GPU stack is used when present, `DOCS_GPU_LAYERS=0` forces CPU inference
-and skips the GPU backend. After that, `.system docs "..."` works directly inside
-the DuckDB shell.
+The platform GPU stack is used when present. After that, `.system docs "..."` works directly
+inside the DuckDB shell.
 
 ## How the data is built
 
