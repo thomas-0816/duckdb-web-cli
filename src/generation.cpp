@@ -5,6 +5,7 @@
 #include "download.h"
 #include "semantic.hpp"
 
+#include <ggml-backend.h>
 #include <llama.h>
 
 #include <algorithm>
@@ -412,12 +413,14 @@ void PrepareAnswerModel(const AnswerLoadProgress &progress) {
 	}
 	EnsureLlamaBackend();
 
+	int gpu = getGpuByProbing();
 	llama_model_params model_params = llama_model_default_params();
-	model_params.n_gpu_layers = GpuLayers();
+	model_params.n_gpu_layers = gpu >= 0 ? -1 : 0;
+	ggml_backend_dev_t devices[] = {gpu >= 0 ? ggml_backend_dev_get(static_cast<size_t>(gpu)) : nullptr, nullptr};
+	model_params.devices = devices;
 	if (model_params.n_gpu_layers == 0) {
-		// Keep the model on the CPU and do not initialize a GPU backend.
-		// GitHub's macOS runners expose a paravirtual Metal device that
-		// crashes even when no layers are offloaded.
+		// No usable GPU. Keep the model on the CPU and avoid placing any tensors
+		// on a backend that cannot allocate memory.
 		model_params.split_mode = LLAMA_SPLIT_MODE_NONE;
 		model_params.main_gpu = -1;
 	}
@@ -430,7 +433,7 @@ void PrepareAnswerModel(const AnswerLoadProgress &progress) {
 	}
 
 	auto trained_context = llama_model_n_ctx_train(model);
-	auto context_tokens = trained_context > 0 ? std::min(trained_context, ANSWER_CONTEXT_TOKENS) : ANSWER_CONTEXT_TOKENS;
+	int context_tokens = trained_context > 0 ? std::min(trained_context, ANSWER_CONTEXT_TOKENS) : ANSWER_CONTEXT_TOKENS;
 
 	llama_context_params context_params = llama_context_default_params();
 	context_params.n_ctx = static_cast<uint32_t>(context_tokens);

@@ -31,12 +31,11 @@ struct SemanticModel {
 	std::string id;
 };
 
-//! Number of model layers to offload to the GPU. Defaults to -1, which offloads
-//! every layer the active backend supports. DOCS_GPU_LAYERS overrides it.
-int GpuLayers();
+//! Probe whether a GPU backend can initialize and allocate memory. Returns the
+//! index of the first usable discrete GPU, or an integrated GPU if none, or -1.
+int getGpuByProbing();
 
-//! Initialize llama.cpp once. When DOCS_GPU_LAYERS is 0, the GPU backend is
-//! disabled so a container or virtual GPU cannot interfere with CPU inference.
+//! Initialize llama.cpp once.
 void EnsureLlamaBackend();
 
 //! Optional callback invoked while the semantic index is being built. `done`

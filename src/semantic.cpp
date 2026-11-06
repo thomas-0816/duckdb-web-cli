@@ -5,6 +5,7 @@
 #include "download.h"
 #include "platform.hpp"
 
+#include <ggml-backend.h>
 #include <hnswlib/hnswlib.h>
 #include <llama.h>
 
@@ -15,7 +16,6 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -26,15 +26,6 @@
 #include <vector>
 
 namespace docs {
-
-int GpuLayers() {
-	if (auto *value = std::getenv("DOCS_GPU_LAYERS")) {
-		if (*value) {
-			return std::atoi(value);
-		}
-	}
-	return -1;
-}
 
 namespace {
 
@@ -103,16 +94,6 @@ void SilentLlamaLog(enum ggml_log_level, const char *, void *) {
 }
 
 void ConfigureLlamaBackend() {
-	// With CPU-only inference, do not initialize the GPU backend at all. This
-	// keeps the Vulkan driver out of the picture in containers and on machines
-	// that expose a virtual GPU that cannot run inference.
-	if (GpuLayers() == 0) {
-#if defined(_WIN32)
-		_putenv_s("GGML_DISABLE_VULKAN", "1");
-#else
-		setenv("GGML_DISABLE_VULKAN", "1", 1);
-#endif
-	}
 	llama_log_set(SilentLlamaLog, nullptr);
 	llama_backend_init();
 }
@@ -168,16 +149,17 @@ public:
 		EnsureLlamaBackend();
 		path_ = EnsureEmbeddingModelFile();
 
-		llama_model_params model_params = llama_model_default_params();
-		model_params.n_gpu_layers = GpuLayers();
+		int gpu = getGpuByProbing();
+		auto model_params = llama_model_default_params();
+		model_params.n_gpu_layers = gpu >= 0 ? -1 : 0;
+		ggml_backend_dev_t devices[] = {gpu >= 0 ? ggml_backend_dev_get(static_cast<size_t>(gpu)) : nullptr, nullptr};
+		model_params.devices = devices;
 		if (model_params.n_gpu_layers == 0) {
-			// Keep the model on the CPU and do not initialize a GPU backend.
-			// GitHub's macOS runners expose a paravirtual Metal device that
-			// crashes even when no layers are offloaded.
+			// No usable GPU. Keep the model on the CPU and avoid placing any tensors
+			// on a backend that cannot allocate memory.
 			model_params.split_mode = LLAMA_SPLIT_MODE_NONE;
 			model_params.main_gpu = -1;
 		}
-
 		model_ = llama_model_load_from_file(path_.c_str(), model_params);
 		if (!model_) {
 			throw std::runtime_error("Could not load the embedding model");
@@ -664,6 +646,38 @@ void EnsureLlamaBackend() {
 		return true;
 	}();
 	(void)initialized;
+}
+
+int getGpuByProbing() {
+	EnsureLlamaBackend();
+	constexpr size_t PROBE_BYTES = 1 << 20;
+	constexpr enum ggml_backend_dev_type DEVICE_TYPES[] = {
+	    GGML_BACKEND_DEVICE_TYPE_GPU,
+	    GGML_BACKEND_DEVICE_TYPE_IGPU,
+	};
+	for (auto wanted : DEVICE_TYPES) {
+		for (size_t i = 0; i < ggml_backend_dev_count(); i++) {
+			auto dev = ggml_backend_dev_get(i);
+			if (ggml_backend_dev_type(dev) != wanted) {
+				continue;
+			}
+			auto backend = ggml_backend_dev_init(dev, nullptr);
+			if (!backend) {
+				continue;
+			}
+			auto buft = ggml_backend_get_default_buffer_type(backend);
+			auto buffer = buft ? ggml_backend_buft_alloc_buffer(buft, PROBE_BYTES) : nullptr;
+			bool ok = buffer != nullptr;
+			if (buffer) {
+				ggml_backend_buffer_free(buffer);
+			}
+			ggml_backend_free(backend);
+			if (ok) {
+				return static_cast<int>(i);
+			}
+		}
+	}
+	return -1;
 }
 
 void SetSemanticProgressCallback(SemanticProgressCallback callback, void *user) {
