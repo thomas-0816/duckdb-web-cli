@@ -656,45 +656,21 @@ int getGpuByProbing() {
 	    GGML_BACKEND_DEVICE_TYPE_GPU,
 	    GGML_BACKEND_DEVICE_TYPE_IGPU,
 	};
-	constexpr size_t PROBE_BYTES = 1 << 20;
 	for (auto wanted : DEVICE_TYPES) {
 		for (size_t i = 0; i < ggml_backend_dev_count(); i++) {
 			auto dev = ggml_backend_dev_get(i);
 			if (ggml_backend_dev_type(dev) != wanted) {
 				continue;
 			}
-#if defined(__APPLE__)
 			auto raw_description = ggml_backend_dev_description(dev);
 			std::string description = raw_description ? raw_description : "";
-			for (auto &c : description) {
-				c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-			}
+			std::transform(description.begin(), description.end(), description.begin(),
+			               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 			// Paravirtual Metal devices on CI runners crash when used.
 			if (description.find("virtual") != std::string::npos) {
 				return -1;
 			}
-			// Only probe discrete Metal GPUs. Integrated GPUs do not need a
-			// probe and are used directly.
-			if (description.find("amd") == std::string::npos &&
-			    description.find("radeon") == std::string::npos &&
-			    description.find("nvidia") == std::string::npos) {
-				return static_cast<int>(i);
-			}
-#endif
-			auto backend = ggml_backend_dev_init(dev, nullptr);
-			if (!backend) {
-				continue;
-			}
-			auto buft = ggml_backend_get_default_buffer_type(backend);
-			auto buffer = buft ? ggml_backend_buft_alloc_buffer(buft, PROBE_BYTES) : nullptr;
-			bool ok = buffer != nullptr;
-			if (buffer) {
-				ggml_backend_buffer_free(buffer);
-			}
-			ggml_backend_free(backend);
-			if (ok) {
-				return static_cast<int>(i);
-			}
+			return static_cast<int>(i);
 		}
 	}
 	return -1;
