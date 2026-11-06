@@ -650,17 +650,28 @@ void EnsureLlamaBackend() {
 
 int getGpuByProbing() {
 	EnsureLlamaBackend();
-	constexpr size_t PROBE_BYTES = 1 << 20;
 	constexpr enum ggml_backend_dev_type DEVICE_TYPES[] = {
 	    GGML_BACKEND_DEVICE_TYPE_GPU,
 	    GGML_BACKEND_DEVICE_TYPE_IGPU,
 	};
+	constexpr size_t PROBE_BYTES = 1 << 20;
 	for (auto wanted : DEVICE_TYPES) {
 		for (size_t i = 0; i < ggml_backend_dev_count(); i++) {
 			auto dev = ggml_backend_dev_get(i);
 			if (ggml_backend_dev_type(dev) != wanted) {
 				continue;
 			}
+#if defined(__APPLE__)
+			auto raw_description = ggml_backend_dev_description(dev);
+			std::string description = raw_description ? raw_description : "";
+			for (auto &c : description) {
+				c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+			}
+			// Initializing a paravirtual Metal device crashes on CI runners.
+			if (description.find("paravirtual") != std::string::npos) {
+				return static_cast<int>(i);
+			}
+#endif
 			auto backend = ggml_backend_dev_init(dev, nullptr);
 			if (!backend) {
 				continue;

@@ -31,8 +31,10 @@ struct SemanticModel {
 	std::string id;
 };
 
-//! Probe whether a GPU backend can initialize and allocate memory. Returns the
-//! index of the first usable discrete GPU, or an integrated GPU if none, or -1.
+//! Return the index of the preferred GPU device, or -1 when there is none.
+//! Discrete GPUs are preferred over integrated GPUs. Devices are probed by
+//! initializing the backend and allocating memory; paravirtual Metal devices
+//! are selected directly.
 int getGpuByProbing();
 
 //! Initialize llama.cpp once.
