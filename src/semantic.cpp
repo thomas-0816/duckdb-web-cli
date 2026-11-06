@@ -41,9 +41,6 @@ constexpr int EMBEDDING_CONTEXT_TOKENS = 512;
 constexpr int EMBEDDING_BATCH_TOKENS = 2048;
 constexpr int EMBEDDING_UBATCH_TOKENS = 2048;
 constexpr int EMBEDDING_MAX_SEQUENCES = 16;
-//! Devices with less memory than this are not worth using for embedding.
-constexpr size_t MIN_GPU_MEMORY_BYTES = 1024ull * 1024ull * 1024ull;
-constexpr size_t MIN_GPU_FREE_MEMORY_BYTES = 100ull * 1024ull * 1024ull;
 
 SemanticProgressCallback progress_callback = nullptr;
 void *progress_callback_user = nullptr;
@@ -677,7 +674,7 @@ int getGpuByProbing() {
 			size_t free_memory = 0;
 			size_t total_memory = 0;
 			ggml_backend_dev_memory(dev, &free_memory, &total_memory);
-			if (total_memory < MIN_GPU_MEMORY_BYTES || free_memory < MIN_GPU_FREE_MEMORY_BYTES) {
+			if (total_memory == 0ULL || free_memory == 0ULL) {
 				continue;
 			}
 			return static_cast<int>(i);
