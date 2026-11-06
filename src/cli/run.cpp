@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <exception>
 #include <iostream>
@@ -243,9 +244,11 @@ int RunAnswerQuery(const char *program, const char *label, const std::string &qu
 			    }
 			    return true;
 		    },
-		    [&](std::size_t done, std::size_t total) {
+		    [&](std::size_t done, std::size_t total, double tokens_per_second) {
 			    auto percent = total == 0 ? 100 : static_cast<int>((done * 100 + total - 1) / total);
-			    show_status("Processing prompt " + std::to_string(percent) + "%");
+			    char speed[32];
+			    std::snprintf(speed, sizeof(speed), "%.1f", std::max(0.0, tokens_per_second));
+			    show_status("Processing prompt " + std::to_string(percent) + "%  " + speed + " t/s");
 		    });
 	} catch (const std::exception &exception) {
 		clear_status();

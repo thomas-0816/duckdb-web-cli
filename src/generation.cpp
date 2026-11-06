@@ -373,7 +373,7 @@ private:
 void DecodePrompt(llama_context *context, const std::vector<llama_token> &tokens,
                   const AnswerPromptProgress &progress) {
 	if (progress) {
-		progress(0, tokens.size());
+		progress(0, tokens.size(), 0.0);
 	}
 	for (std::size_t position = 0; position < tokens.size();) {
 		auto remaining = tokens.size() - position;
@@ -386,7 +386,11 @@ void DecodePrompt(llama_context *context, const std::vector<llama_token> &tokens
 		}
 		position += static_cast<std::size_t>(count);
 		if (progress) {
-			progress(position, tokens.size());
+			llama_synchronize(context);
+			auto timings = llama_perf_context(context);
+			double tokens_per_second =
+			    timings.t_p_eval_ms > 0.0 ? timings.n_p_eval * 1000.0 / timings.t_p_eval_ms : 0.0;
+			progress(position, tokens.size(), tokens_per_second);
 		}
 	}
 }

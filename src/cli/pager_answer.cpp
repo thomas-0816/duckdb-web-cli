@@ -645,7 +645,7 @@ AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
 			    }
 			    return true;
 		    },
-		    [&](std::size_t done, std::size_t total) {
+		    [&](std::size_t done, std::size_t total, double tokens_per_second) {
 			    if (stop) {
 				    return;
 			    }
@@ -653,7 +653,8 @@ AnswerAction ShowAnswerWithResults(const char *label, const std::string &query,
 			    constexpr std::size_t BAR_WIDTH = 20;
 			    std::string bar(BAR_WIDTH, ' ');
 			    std::fill_n(bar.begin(), static_cast<std::size_t>(percent) * BAR_WIDTH / 100, '#');
-			    auto status = " Processing prompt [" + bar + "] " + std::to_string(percent) + "%";
+			    auto status = " Processing prompt [" + bar + "] " + std::to_string(percent) + "%  " +
+			                  FormatTokenSpeed(tokens_per_second) + " t/s";
 			    if (!handle_pending_input(status, true)) {
 				    return;
 			    }
@@ -820,12 +821,13 @@ bool ShowAnswer(const char *label, const std::string &query, const std::vector<S
 				if (complete > 0) {
 					draw(status);
 				}
-				return true; }, [&](std::size_t done, std::size_t total) {
+				return true; }, [&](std::size_t done, std::size_t total, double tokens_per_second) {
 				auto percent = total == 0 ? 100 : static_cast<int>((done * 100 + total - 1) / total);
 				constexpr std::size_t BAR_WIDTH = 20;
 				std::string bar(BAR_WIDTH, ' ');
 				std::fill_n(bar.begin(), static_cast<std::size_t>(percent) * BAR_WIDTH / 100, '#');
-				auto status = " Processing prompt [" + bar + "] " + std::to_string(percent) + "%";
+				auto status = " Processing prompt [" + bar + "] " + std::to_string(percent) + "%  " +
+				              FormatTokenSpeed(tokens_per_second) + " t/s";
 				draw(status); });
 		} catch (const std::exception &exception) {
 			error = exception.what();

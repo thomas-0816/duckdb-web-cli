@@ -39,8 +39,10 @@ void PrepareAnswerModel(const AnswerLoadProgress &progress = nullptr);
 using AnswerTokenCallback =
     std::function<bool(const std::string &text, bool reasoning, double tokens_per_second)>;
 
-//! Reports prompt-processing progress. `done` and `total` count prompt tokens.
-using AnswerPromptProgress = std::function<void(std::size_t done, std::size_t total)>;
+//! Reports prompt-processing progress. `done` and `total` count prompt tokens,
+//! and `tokens_per_second` is the prompt speed reported by llama.cpp's timings.
+using AnswerPromptProgress =
+    std::function<void(std::size_t done, std::size_t total, double tokens_per_second)>;
 
 //! Ask the answer model a question with the given documentation content blocks
 //! as context. The answer is streamed through `callback`. `prompt_progress` is
