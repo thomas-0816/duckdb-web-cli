@@ -137,7 +137,7 @@ BuiltAnswerPage BuildAnswerPage(const std::string &reasoning, const std::string 
 	SearchResult result;
 	result.content = ComposeLiveAnswer(reasoning, answer);
 	result.title = "Answer: " + query;
-	AppendPageContent(page, result, color, false, columns);
+	AppendPageContent(page, result, color, false, columns, false);
 	BuiltAnswerPage built;
 	built.answer_lines = page.content.size();
 	built.page = std::move(page);
@@ -278,7 +278,7 @@ SplitAnswerPage BuildSplitAnswerPage(const char *label, const std::string &query
 		                     : ComposeLiveAnswer(reasoning, answer);
 	}
 	body.title = "Answer: " + query;
-	AppendPageContent(page, body, color, false, columns);
+	AppendPageContent(page, body, color, false, columns, false);
 	return built;
 }
 
@@ -847,7 +847,7 @@ bool ShowAnswer(const char *label, const std::string &query, const std::vector<S
 		result.content = content;
 		result.title = " Answer: " + query;
 		bool regenerate = false;
-		auto done = RunInternalPage(label, result, color, false, &regenerate);
+		auto done = RunInternalPage(label, result, color, false, &regenerate, false);
 		if (!regenerate) {
 			return done;
 		}

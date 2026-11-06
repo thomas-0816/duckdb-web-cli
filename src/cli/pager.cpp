@@ -457,7 +457,7 @@ bool IsRedirectStub(const SearchResult &result) {
 	return has_date && has_tldr && body_lines <= 5;
 }
 
-void AppendPageContent(PagerPage &page, const SearchResult &result, bool color, bool raw, int columns) {
+void AppendPageContent(PagerPage &page, const SearchResult &result, bool color, bool raw, int columns, bool show_toc) {
 	auto source = result.content;
 	if (IsRedirectStub(result)) {
 		source += "\n\n[Open the original post](" + result.url + EXTERNAL_LINK_SUFFIX + ")";
@@ -469,7 +469,7 @@ void AppendPageContent(PagerPage &page, const SearchResult &result, bool color, 
 	auto is_external = [](const std::string &url) { return IsExternalLink(url) || !IsInternalPageUrl(url); };
 	auto content = raw ? source : cli::RenderMarkdown(source, color, &headings, is_external);
 
-	if (!raw && !headings.empty()) {
+	if (!raw && show_toc && !headings.empty()) {
 		std::size_t max_text_width = 0;
 		for (std::size_t i = 1; i < headings.size(); i++) {
 			auto text = PlainHeadingText(headings[i].text);
@@ -545,7 +545,7 @@ PagerPage BuildPage(const std::vector<SearchResult> &results, std::size_t index,
 	return page;
 }
 
-PagerPage BuildInternalPage(const SearchResult &result, bool color, bool raw, int columns) {
+PagerPage BuildInternalPage(const SearchResult &result, bool color, bool raw, int columns, bool show_toc) {
 	PagerPage page;
 	page.score = 0;
 	auto width_limit = static_cast<std::size_t>(std::max(columns - 1, 1));
@@ -559,7 +559,7 @@ PagerPage BuildInternalPage(const SearchResult &result, bool color, bool raw, in
 	}
 	page.header.push_back(back + " | " + title);
 	AppendPageHeader(page, color, columns);
-	AppendPageContent(page, result, color, raw, columns);
+	AppendPageContent(page, result, color, raw, columns, show_toc);
 	return page;
 }
 
@@ -1639,11 +1639,12 @@ QueryEdit EditQuery(const char *label, SearchFunction search, idx_t limit, const
 
 //! Show a page opened from a link in the pager. Returns true when the user
 //! asked to quit the whole application; Esc returns to the previous page.
-bool RunInternalPage(const char *label, const SearchResult &result, bool color, bool raw, bool *regenerate) {
+bool RunInternalPage(const char *label, const SearchResult &result, bool color, bool raw, bool *regenerate,
+                     bool show_toc) {
 	std::vector<PagerPage> pages;
 	auto size = GetTerminalSize();
 	int last_rows = size.rows;
-	pages.push_back(BuildInternalPage(result, color, raw, size.columns));
+	pages.push_back(BuildInternalPage(result, color, raw, size.columns, show_toc));
 	auto links = CollectPageLinks(pages[0]);
 	std::size_t selected_link = std::size_t(-1);
 	std::size_t scroll = 0;
@@ -1680,7 +1681,7 @@ bool RunInternalPage(const char *label, const SearchResult &result, bool color, 
 			bool was_at_top = scroll == 0;
 			bool was_at_bottom = old_max_scroll > 0 && scroll >= old_max_scroll;
 
-			pages[0] = BuildInternalPage(result, color, raw, new_size.columns);
+			pages[0] = BuildInternalPage(result, color, raw, new_size.columns, show_toc);
 			links = CollectPageLinks(pages[0]);
 			auto new_header_rows = static_cast<int>(pages[0].header.size());
 			auto new_available = static_cast<std::size_t>(

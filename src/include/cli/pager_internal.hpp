@@ -62,7 +62,8 @@ struct VisibleQuery {
 
 VisibleQuery FitQueryToWidth(const std::string &query, std::size_t cursor, std::size_t max_width);
 
-void AppendPageContent(PagerPage &page, const SearchResult &result, bool color, bool raw, int columns);
+void AppendPageContent(PagerPage &page, const SearchResult &result, bool color, bool raw, int columns,
+                       bool show_toc = true);
 void AppendPageHeader(PagerPage &page, bool color, int columns);
 
 bool IsExternalLink(const std::string &url);
@@ -109,6 +110,6 @@ void Draw(const std::vector<PagerPage> &pages, std::size_t index, std::size_t &s
           std::size_t selected_toc, const TextSelection *selection);
 
 bool RunInternalPage(const char *label, const SearchResult &result, bool color, bool raw,
-                     bool *regenerate = nullptr);
+                     bool *regenerate = nullptr, bool show_toc = true);
 
 } // namespace docs

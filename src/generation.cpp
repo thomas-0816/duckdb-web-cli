@@ -3,6 +3,7 @@
 #include "arg.h"
 #include "chat.h"
 #include "download.h"
+#include "reasoning-budget.h"
 #include "semantic.hpp"
 
 #include <ggml-backend.h>
@@ -33,6 +34,14 @@ constexpr int ANSWER_MAX_OUTPUT_TOKENS = 2048;
 constexpr int ANSWER_BATCH_TOKENS = 2048;
 constexpr int ANSWER_UBATCH_TOKENS = 1024;
 constexpr int ANSWER_THREADS = 8;
+
+//! Maximum number of thinking tokens before the model is nudged to answer.
+constexpr int ANSWER_REASONING_BUDGET_TOKENS = 512;
+
+//! Injected before the end tag when the reasoning budget runs out, so the model
+//! switches to answering instead of stopping right after the forced end tag.
+constexpr const char *ANSWER_REASONING_BUDGET_MESSAGE =
+    "\n\nI have enough information now. I will answer the question directly.\n";
 
 constexpr float ANSWER_TEMPERATURE = 0.9f;
 
@@ -493,10 +502,27 @@ void GenerateAnswer(const std::string &question, const std::vector<SearchResult>
 
 	auto sampler_params = llama_sampler_chain_default_params();
 	auto *sampler = llama_sampler_chain_init(sampler_params);
+
+	if (!prompt.thinking_end_tags.empty()) {
+		// Keep the model's thinking short. When the budget runs out, inject a
+		// short nudge and then force the thinking end tag.
+		auto end_tokens = Tokenize(vocab, prompt.thinking_end_tags.front());
+		auto forced = Tokenize(vocab, ANSWER_REASONING_BUDGET_MESSAGE);
+		forced.insert(forced.end(), end_tokens.begin(), end_tokens.end());
+		auto *budget = common_reasoning_budget_init(vocab, {}, {end_tokens}, forced,
+		                                            ANSWER_REASONING_BUDGET_TOKENS,
+		                                            REASONING_BUDGET_COUNTING);
+		llama_sampler_chain_add(sampler, budget);
+	}
+
 	llama_sampler_chain_add(sampler, llama_sampler_init_temp(ANSWER_TEMPERATURE));
 	llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
 
-	ReasoningSplitter splitter(prompt.thinking_end_tags, callback);
+	std::size_t generated_tokens = 0;
+	AnswerTokenCallback counted_callback = [&](const std::string &text, bool reasoning) {
+		return callback(text, reasoning, generated_tokens);
+	};
+	ReasoningSplitter splitter(prompt.thinking_end_tags, counted_callback);
 	try {
 		DecodePrompt(engine.context, prompt.tokens, prompt_progress);
 		for (int generated = 0; generated < ANSWER_MAX_OUTPUT_TOKENS; generated++) {
@@ -504,6 +530,7 @@ void GenerateAnswer(const std::string &question, const std::vector<SearchResult>
 			if (llama_vocab_is_eog(vocab, token)) {
 				break;
 			}
+			generated_tokens = static_cast<std::size_t>(generated) + 1;
 			auto piece = TokenToPiece(vocab, token);
 			if (!piece.empty() && !splitter.Feed(piece)) {
 				break;
