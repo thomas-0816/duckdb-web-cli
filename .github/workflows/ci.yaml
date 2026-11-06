@@ -79,6 +79,14 @@ jobs:
       - name: Build and Test
         run: |
           make
+          xcrun lldb --batch \
+            -o run \
+            -o "thread backtrace all" \
+            -- ./build/release/docs "how to read a parquet file" 1 > /tmp/lldb.log 2>&1 || true
+          cat /tmp/lldb.log
+          if grep -q "stop reason = " /tmp/lldb.log; then
+            exit 1
+          fi
           make test
   windows:
     name: Windows
