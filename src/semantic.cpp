@@ -670,7 +670,6 @@ int getGpuByProbing() {
 			if (description.find("virtual") != std::string::npos) {
 				return -1;
 			}
-			// Tiny devices cannot hold the embedding model and only slow us down.
 			size_t free_memory = 0;
 			size_t total_memory = 0;
 			ggml_backend_dev_memory(dev, &free_memory, &total_memory);
