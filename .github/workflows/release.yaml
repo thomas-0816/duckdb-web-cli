@@ -138,6 +138,13 @@ jobs:
           fi
           echo "VULKAN_SDK=C:\\VulkanSDK\\${VULKAN_VERSION}" >> "$GITHUB_ENV"
           echo "C:\\VulkanSDK\\${VULKAN_VERSION}\\bin" >> "$GITHUB_PATH"
+      # The MSVC STL in the VS 2026 image requires Clang 22, while the image
+      # still ships LLVM 20. Install the matching LLVM like llama.cpp does.
+      - name: Install LLVM
+        if: runner.arch == 'X64'
+        run: |
+          choco install llvm --version=22.1.8
+          echo "C:\Program Files\LLVM\bin" >> $env:GITHUB_PATH
       - name: Build and Upload
         shell: bash
         run: |
