@@ -45,6 +45,8 @@ constexpr const char *ANSWER_REASONING_BUDGET_MESSAGE =
 
 constexpr float ANSWER_TEMPERATURE = 0.9f;
 
+constexpr float ANSWER_PENALTY_REPEAT = 1.05f;
+
 constexpr const char *ANSWER_SYSTEM_PROMPT =
     "You answer questions about DuckDB. Use only the documentation excerpts supplied in the user message, "
     "the SQL-92 standard, and the SQL-99 standard. Do not use any other background knowledge. "
@@ -513,7 +515,9 @@ void GenerateAnswer(const std::string &question, const std::vector<SearchResult>
 
 	auto &engine = GetAnswerEngine();
 	auto *vocab = llama_model_get_vocab(engine.model);
-	auto prompt = RenderAnswerPrompt(engine, question, blocks);
+	// Use the spelling-corrected query that search applied
+	auto question_text = !blocks.empty() && !blocks.front().corrected_query.empty() ? blocks.front().corrected_query : question;
+	auto prompt = RenderAnswerPrompt(engine, question_text, blocks);
 
 	auto *memory = llama_get_memory(engine.context);
 	if (memory) {
@@ -535,6 +539,9 @@ void GenerateAnswer(const std::string &question, const std::vector<SearchResult>
 		llama_sampler_chain_add(sampler, budget);
 	}
 
+	// Discourage reusing the same tokens too soon. 64 tokens is llama.cpp's
+	// default penalty window.
+	llama_sampler_chain_add(sampler, llama_sampler_init_penalties(llama_vocab_n_tokens(vocab), 64, ANSWER_PENALTY_REPEAT, 0.0f, 0.0f));
 	llama_sampler_chain_add(sampler, llama_sampler_init_temp(ANSWER_TEMPERATURE));
 	llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
 

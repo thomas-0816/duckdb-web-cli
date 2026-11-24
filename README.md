@@ -208,7 +208,9 @@ In the live search, `--model` also controls the model used by `Answer with LLM`.
 The program searches the documentation and blog as usual, takes the ten
 best-matching content blocks (chunks of at most about 1,800 characters, each
 prefixed with its page title), and sends the question together with those blocks
-to the answer model. `ESC` stops answer generation.
+to the answer model. When spelling correction changed the query, the answer model
+receives the corrected query, so the question and the excerpts use the same
+terms. `ESC` stops answer generation.
 `Enter` stops generation and starts it again, so a new answer can
 be requested without leaving the view. The model's reasoning is streamed below
 the list under `Reasoning` and is hidden as soon as the answer starts. The final
@@ -226,7 +228,8 @@ search> how do I read a parquet file?
 The answer uses a 16,384-token context. When the ten matching blocks do not fit,
 blocks are dropped from the end and the last remaining block is shortened. The
 question and the model's generation prompt are always kept. Sampling uses a
-temperature of 0.9.
+temperature of 0.9 and a repetition penalty of 1.05 to
+stop the model from looping over the same words.
 
 ## Semantic search
 
