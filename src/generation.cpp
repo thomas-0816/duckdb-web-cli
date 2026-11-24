@@ -370,29 +370,42 @@ private:
 	bool reasoning_ = false;
 };
 
-void DecodePrompt(llama_context *context, const std::vector<llama_token> &tokens,
-                  const AnswerPromptProgress &progress) {
+llama_pos DecodePrompt(llama_context *context, const std::vector<llama_token> &tokens,
+                       const AnswerPromptProgress &progress) {
 	if (progress) {
 		progress(0, tokens.size(), 0.0);
 	}
-	for (std::size_t position = 0; position < tokens.size();) {
-		auto remaining = tokens.size() - position;
-		auto count = static_cast<int32_t>(std::min<std::size_t>(remaining, ANSWER_BATCH_TOKENS));
-		auto batch = llama_batch_get_one(const_cast<llama_token *>(tokens.data() + position), count);
-		auto status = llama_decode(context, batch);
+	std::unique_ptr<llama_batch_ext, decltype(&llama_batch_ext_free)> batch(
+	    llama_batch_ext_init(context), llama_batch_ext_free);
+	auto *memory = llama_get_memory(context);
+	const llama_pos base = memory ? llama_memory_seq_pos_max(memory, 0) + 1 : 0;
+	for (std::size_t offset = 0; offset < tokens.size();) {
+		const auto count = std::min<std::size_t>(tokens.size() - offset, ANSWER_BATCH_TOKENS);
+		llama_batch_ext_clear(batch.get());
+		for (std::size_t i = 0; i < count; i++) {
+			auto index = llama_batch_ext_add_token(batch.get(), 0, tokens[offset + i]);
+			llama_pos position = base + static_cast<llama_pos>(offset + i);
+			// Only the last token of the batch needs logits, as before.
+			if (index < 0 || !llama_batch_ext_set_pos(batch.get(), index, &position) ||
+			    (i + 1 == count && !llama_batch_ext_set_output_logits(batch.get(), index, true))) {
+				throw std::runtime_error("The answer model could not buffer the prompt");
+			}
+		}
+		auto status = llama_process(context, LLAMA_PROCESS_TYPE_DECODE, batch.get());
 		if (status != 0) {
 			throw std::runtime_error("The answer model failed to read the prompt (status " +
 			                         std::to_string(status) + ")");
 		}
-		position += static_cast<std::size_t>(count);
+		offset += count;
 		if (progress) {
 			llama_synchronize(context);
 			auto timings = llama_perf_context(context);
 			double tokens_per_second =
 			    timings.t_p_eval_ms > 0.0 ? timings.n_p_eval * 1000.0 / timings.t_p_eval_ms : 0.0;
-			progress(position, tokens.size(), tokens_per_second);
+			progress(offset, tokens.size(), tokens_per_second);
 		}
 	}
+	return base + static_cast<llama_pos>(tokens.size());
 }
 
 } // namespace
@@ -530,8 +543,10 @@ void GenerateAnswer(const std::string &question, const std::vector<SearchResult>
 		return callback(text, reasoning, tokens_per_second);
 	};
 	ReasoningSplitter splitter(prompt.thinking_end_tags, counted_callback);
+	std::unique_ptr<llama_batch_ext, decltype(&llama_batch_ext_free)> batch(
+	    llama_batch_ext_init(engine.context), llama_batch_ext_free);
 	try {
-		DecodePrompt(engine.context, prompt.tokens, prompt_progress);
+		auto position = DecodePrompt(engine.context, prompt.tokens, prompt_progress);
 		llama_perf_context_reset(engine.context);
 		for (int generated = 0; generated < ANSWER_MAX_OUTPUT_TOKENS; generated++) {
 			auto token = llama_sampler_sample(sampler, engine.context, -1);
@@ -539,11 +554,17 @@ void GenerateAnswer(const std::string &question, const std::vector<SearchResult>
 				break;
 			}
 			auto piece = TokenToPiece(vocab, token);
-			auto batch = llama_batch_get_one(&token, 1);
-			auto status = llama_decode(engine.context, batch);
+			llama_batch_ext_clear(batch.get());
+			auto index = llama_batch_ext_add_token(batch.get(), 0, token);
+			if (index < 0 || !llama_batch_ext_set_pos(batch.get(), index, &position) ||
+			    !llama_batch_ext_set_output_logits(batch.get(), index, true)) {
+				throw std::runtime_error("The answer model could not buffer the generated token");
+			}
+			auto status = llama_process(engine.context, LLAMA_PROCESS_TYPE_DECODE, batch.get());
 			if (status != 0) {
 				throw std::runtime_error("The answer model stopped with status " + std::to_string(status));
 			}
+			position++;
 
 			auto timings = llama_perf_context(engine.context);
 			if (timings.t_eval_ms > 0.0) {

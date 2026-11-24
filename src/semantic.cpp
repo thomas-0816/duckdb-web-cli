@@ -231,7 +231,7 @@ public:
 			tokenized.push_back(Tokenize(text));
 		}
 
-		auto batch = llama_batch_init(EMBEDDING_BATCH_TOKENS, 0, EMBEDDING_MAX_SEQUENCES);
+		auto *batch = llama_batch_ext_init(ctx_);
 		std::size_t done = 0;
 		std::size_t next = 0;
 		try {
@@ -239,6 +239,7 @@ public:
 				// llama.cpp keeps per-sequence state between calls. Embeddings do
 				// not need it, so start every batch from a clean state.
 				llama_memory_clear(llama_get_memory(ctx_), true);
+				llama_batch_ext_clear(batch);
 
 				auto first = next;
 				int tokens_in_batch = 0;
@@ -252,20 +253,21 @@ public:
 					}
 					first_token[sequences] = tokens_in_batch;
 					for (int i = 0; i < count; i++) {
-						auto position = tokens_in_batch + i;
-						batch.token[position] = tokens[static_cast<std::size_t>(i)];
-						batch.pos[position] = i;
-						batch.n_seq_id[position] = 1;
-						batch.seq_id[position][0] = sequences;
-						batch.logits[position] = 0;
+						// Every document gets its own sequence so its pooled
+						// vector can be read back below.
+						auto index = llama_batch_ext_add_token(
+						    batch, sequences, tokens[static_cast<std::size_t>(i)]);
+						llama_pos position = i;
+						if (index < 0 || !llama_batch_ext_set_pos(batch, index, &position)) {
+							throw std::runtime_error("Could not build the embedding batch");
+						}
 					}
 					tokens_in_batch += count;
 					sequences++;
 					next++;
 				}
-				batch.n_tokens = tokens_in_batch;
 
-				auto status = llama_decode(ctx_, batch);
+				auto status = llama_process(ctx_, LLAMA_PROCESS_TYPE_DECODE, batch);
 				if (status != 0) {
 					throw std::runtime_error("Embedding inference failed with status " + std::to_string(status));
 				}
@@ -296,10 +298,10 @@ public:
 				}
 			}
 		} catch (...) {
-			llama_batch_free(batch);
+			llama_batch_ext_free(batch);
 			throw;
 		}
-		llama_batch_free(batch);
+		llama_batch_ext_free(batch);
 	}
 
 private:
