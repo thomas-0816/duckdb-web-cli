@@ -190,9 +190,6 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      # The artifact listing API can briefly return no results right after the
-      # upload finishes. Running the deploy in its own job gives the artifact
-      # service time to index it, so the first deploy attempt succeeds.
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
